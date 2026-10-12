@@ -32,9 +32,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.cleanforge.core.privileged.CapabilityReport
+import com.cleanforge.core.privileged.CapabilityStatus
+import com.cleanforge.core.privileged.OperationCapability
 import com.cleanforge.core.shizuku.ShizukuManager
 import com.cleanforge.core.shizuku.ShizukuState
 import com.cleanforge.ui.formatBytes
+import java.text.DateFormat
+import java.util.Date
 
 fun openAllFilesSettings(context: Context) {
     val uri = Uri.parse("package:${context.packageName}")
@@ -131,28 +136,44 @@ fun AllFilesCard(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-fun ShizukuCard(state: ShizukuState, onRequestPermission: () -> Unit, onOpenShizuku: () -> Unit) {
+fun ShizukuCard(
+    state: ShizukuState,
+    report: CapabilityReport?,
+    onRequestPermission: () -> Unit,
+    onOpenShizuku: () -> Unit,
+    onRecheck: () -> Unit
+) {
     val icon: @Composable () -> Unit = { Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary) }
     when (state) {
-        is ShizukuState.Authorized -> InfoCard(
-            title = "Shizuku connected",
-            body = if (state.isRoot)
-                "Running in root mode. CleanForge still only touches the exact folders it explains to you."
-            else
-                "Running in shell mode (not root). App caches and uninstalled-app leftovers are available.",
-            icon = icon
-        )
+        is ShizukuState.Authorized -> {
+            InfoCard(
+                title = "Shizuku is running and CleanForge may use it",
+                body = (if (state.isRoot)
+                    "Running in root mode. CleanForge still only touches the exact folders it explains to you."
+                else
+                    "Running in shell mode (not root). The shell user can reach Android/data and Android/obb but not other apps' private data.") +
+                    " This alone does not prove that every cleanup works on your phone; the checks below do.",
+                icon = icon
+            )
+            if (report != null) CapabilityCard(report, onRecheck)
+        }
         ShizukuState.NotInstalled -> InfoCard(
             title = "Shizuku is optional",
             body = "Without it, Android 11+ hides other apps' cache folders (Android/data), so those cleaners are " +
                 "switched off. Everything else works. Install and start Shizuku, then come back.",
-            icon = icon
+            icon = icon,
+            action = { OutlinedButton(onClick = onRecheck) { Text("Check again") } }
         )
         ShizukuState.NotRunning -> InfoCard(
             title = "Shizuku is not running",
             body = "Start Shizuku (wireless debugging or adb), then return here. It is not root.",
             icon = icon,
-            action = { OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") } }
+            action = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") }
+                    OutlinedButton(onClick = onRecheck) { Text("Check again") }
+                }
+            }
         )
         ShizukuState.PermissionDenied -> InfoCard(
             title = "Shizuku permission needed",
@@ -160,14 +181,65 @@ fun ShizukuCard(state: ShizukuState, onRequestPermission: () -> Unit, onOpenShiz
             icon = icon,
             action = { Button(onClick = onRequestPermission) { Text("Grant permission") } }
         )
+        ShizukuState.PermissionPermanentlyDenied -> InfoCard(
+            title = "Shizuku permission was blocked",
+            body = "You chose \"don't ask again\", so Android will not show the dialog again. Open the Shizuku app, " +
+                "find CleanForge in its list of authorized apps and allow it, then come back.",
+            icon = icon,
+            action = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onOpenShizuku) { Text("Open Shizuku") }
+                    OutlinedButton(onClick = onRecheck) { Text("Check again") }
+                }
+            }
+        )
         ShizukuState.Disconnected -> InfoCard(
             title = "Shizuku disconnected",
             body = "The Shizuku service stopped. Start it again, then return here.",
             icon = icon,
+            action = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") }
+                    OutlinedButton(onClick = onRecheck) { Text("Check again") }
+                }
+            }
+        )
+        ShizukuState.ServerTooOld -> InfoCard(
+            title = "Shizuku is too old",
+            body = "CleanForge needs Shizuku version 11 or newer. Update the Shizuku app, restart it, then come back.",
+            icon = icon,
             action = { OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") } }
         )
-        is ShizukuState.Error -> InfoCard(title = "Shizuku problem", body = state.message, icon = icon)
+        is ShizukuState.Error -> InfoCard(
+            title = "Shizuku problem",
+            body = state.message,
+            icon = icon,
+            action = { OutlinedButton(onClick = onRecheck) { Text("Check again") } }
+        )
     }
+}
+
+/** One row per privileged operation: what it needs, whether it works HERE, and its limits. Nothing is assumed. */
+@Composable
+fun CapabilityCard(report: CapabilityReport, onRecheck: () -> Unit) {
+    InfoCard(
+        title = "What Shizuku can do here",
+        body = report.operations.values.joinToString("\n\n") { c ->
+            val checked = c.checkedAtMs?.let { " (" + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it)) + ")" } ?: ""
+            "${c.operation.title}\n${capabilityLabel(c)}$checked: ${c.reason}"
+        } + (report.serviceUid?.let { "\n\nService runs as uid $it" + (if (it == 0) " (root)." else " (shell, not root).") } ?: ""),
+        icon = { Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary) },
+        action = { OutlinedButton(onClick = onRecheck) { Text("Check again") } }
+    )
+}
+
+private fun capabilityLabel(c: OperationCapability): String = when (c.status) {
+    CapabilityStatus.VERIFIED -> "Verified"
+    CapabilityStatus.PREREQUISITES_MET -> "Ready, not proven yet"
+    CapabilityStatus.NEEDS_AUTHORIZATION -> "Needs permission"
+    CapabilityStatus.UNAVAILABLE -> "Unavailable right now"
+    CapabilityStatus.UNSUPPORTED -> "Not supported on this device"
+    CapabilityStatus.UNKNOWN -> "Not checked"
 }
 
 @Composable

@@ -29,6 +29,7 @@ import com.cleanforge.core.model.Reversibility
 import com.cleanforge.core.model.RiskLevel
 import com.cleanforge.core.model.ScanItem
 import com.cleanforge.ui.formatBytes
+import com.cleanforge.ui.sizeLabel
 
 @Composable
 fun Tag(text: String, container: Color, content: Color, modifier: Modifier = Modifier) {
@@ -89,7 +90,7 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit, modifier: M
         },
         trailingContent = {
             Text(
-                if (item.sizeBytes > 0) formatBytes(item.sizeBytes) else "0 B",
+                item.sizeLabel(),
                 style = MaterialTheme.typography.labelLarge
             )
         }

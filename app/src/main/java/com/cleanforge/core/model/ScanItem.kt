@@ -12,6 +12,15 @@ object ProtectedApps {
     )
 }
 
+/** How much to trust [ScanItem.sizeBytes]. A size is never an estimate: it is measured, or a measured lower bound. */
+enum class SizeQuality {
+    /** Complete walk, nothing unreadable. Logical bytes (sum of file sizes), not disk blocks. */
+    MEASURED,
+
+    /** At least this much: the walk hit a safety bound or some sub-folders could not be read. */
+    LOWER_BOUND
+}
+
 /**
  * Result of CLASSIFY. A ScanItem is a *proposal with evidence*, never a deletion command:
  * it only becomes a deletion after VALIDATE -> PLAN -> USER CONFIRMATION -> REVALIDATE.
@@ -35,7 +44,10 @@ data class ScanItem(
     val fingerprint: FsStat? = null,
     /** For duplicates: the copy that stays. It must still exist, unchanged, at deletion time. */
     val keepPath: String? = null,
-    val keepFingerprint: FsStat? = null
+    val keepFingerprint: FsStat? = null,
+    val sizeQuality: SizeQuality = SizeQuality.MEASURED,
+    /** Directories inside the item that could not be listed while measuring (their bytes are not in [sizeBytes]). */
+    val unreadableCount: Int = 0
 ) {
     val displayName: String get() = path.substringAfterLast('/')
 

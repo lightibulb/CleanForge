@@ -21,7 +21,13 @@ package com.cleanforge.core.fs
  */
 class SafeDeleter(
     private val fs: FsOps,
-    private val limits: WalkLimits = WalkLimits(maxDepth = 48, maxEntries = 200_000)
+    private val limits: WalkLimits = WalkLimits(maxDepth = 48, maxEntries = 200_000),
+    /**
+     * Polled between entries. When it returns true the walk stops BEFORE touching the next entry and the result is
+     * [DeleteStatus.CANCELLED] (or [DeleteStatus.PARTIAL]-like counts in the result). Never interrupts a single
+     * remove() call, and never changes deletion order or identity checks.
+     */
+    private val isCancelled: () -> Boolean = { false }
 ) {
 
     fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult {
@@ -65,6 +71,7 @@ class SafeDeleter(
         var failed = 0
         var visited = 0
         var limit = false
+        var cancelled = false
         var firstProblem = ""
     }
 
@@ -78,6 +85,7 @@ class SafeDeleter(
             removeIfUnchanged(root, rootStat, ctx, "Could not remove the folder itself")
         }
         val status = when {
+            ctx.cancelled -> DeleteStatus.CANCELLED
             ctx.limit -> DeleteStatus.LIMIT_EXCEEDED
             ctx.failed == 0 -> DeleteStatus.OK
             ctx.entries > 0 -> DeleteStatus.PARTIAL
@@ -135,6 +143,11 @@ class SafeDeleter(
 
         var clean = true
         for (name in names) {
+            if (isCancelled()) {
+                ctx.cancelled = true
+                if (ctx.firstProblem.isEmpty()) ctx.firstProblem = "Stopped before finishing"
+                return false
+            }
             if (!StorageWalker.isPlainName(name)) {
                 problem(ctx, "Skipped an entry with an unsafe name")
                 clean = false
@@ -166,7 +179,7 @@ class SafeDeleter(
                     if (!removeIfUnchanged(child, cs, ctx, "Could not remove an entry")) clean = false
                 }
             }
-            if (ctx.limit) return false
+            if (ctx.limit || ctx.cancelled) return false
         }
         return clean
     }

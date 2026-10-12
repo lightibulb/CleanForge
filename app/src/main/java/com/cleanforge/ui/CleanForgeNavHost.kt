@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -31,6 +32,7 @@ import com.cleanforge.ui.components.ProgressDialog
 import com.cleanforge.ui.components.ReportDialog
 import com.cleanforge.ui.screens.AboutScreen
 import com.cleanforge.ui.screens.CleanScreen
+import com.cleanforge.ui.screens.RamScreen
 import com.cleanforge.ui.screens.ReviewScreen
 
 private data class Dest(val route: String, val label: String, val icon: ImageVector)
@@ -38,6 +40,7 @@ private data class Dest(val route: String, val label: String, val icon: ImageVec
 private val DESTINATIONS = listOf(
     Dest("clean", "Clean", Icons.Default.CleaningServices),
     Dest("review", "Review", Icons.Default.FactCheck),
+    Dest("ram", "Memory", Icons.Default.Memory),
     Dest("about", "About", Icons.Default.Info)
 )
 
@@ -89,6 +92,7 @@ fun CleanForgeNavHost(vm: CleanViewModel = hiltViewModel()) {
         ) {
             composable("clean") { CleanScreen(vm) }
             composable("review") { ReviewScreen(vm) }
+            composable("ram") { RamScreen() }
             composable("about") { AboutScreen() }
         }
     }
@@ -99,6 +103,6 @@ fun CleanForgeNavHost(vm: CleanViewModel = hiltViewModel()) {
     }
     ui.cleaning?.let { c ->
         val report = c.report
-        if (report == null) ProgressDialog(c) else ReportDialog(report, onDismiss = vm::dismissReport)
+        if (report == null) ProgressDialog(c, onStop = vm::cancelClean) else ReportDialog(report, onDismiss = vm::dismissReport)
     }
 }

@@ -1,12 +1,20 @@
 package com.cleanforge.core
 
 import com.cleanforge.core.backend.ArchiveInfo
+import com.cleanforge.core.backend.DirListing
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.FsResult
+import com.cleanforge.core.backend.InstallState
+import com.cleanforge.core.backend.PackageInventory
 import com.cleanforge.core.backend.StandardFileBackend
 import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsStat
+import com.cleanforge.core.fs.SizeResult
 import com.cleanforge.core.model.CleaningCategory
 import com.cleanforge.core.model.ConfidenceLevel
 import com.cleanforge.core.model.RiskLevel
 import com.cleanforge.core.model.ScanItem
+import com.cleanforge.core.model.SizeQuality
 import com.cleanforge.core.scanner.ApkScanner
 import com.cleanforge.core.scanner.CacheScanner
 import com.cleanforge.core.scanner.CorpseScanner
@@ -267,6 +275,153 @@ class ScannerEvidenceTest {
             known = FakeInventory.defaultPackages(),
             installed = FakeInventory.defaultPackages("com.odd.app")
         )
+        assertThat(CorpseScanner(backend, inv, storage, { now }).found()).isEmpty()
+    }
+
+    // ---------- failures are reported, never read as "nothing there" (Part 2) ----------
+
+    /** A backend that can be told to fail or to answer differently for chosen paths; everything else is real. */
+    private class ScriptedBackend(private val inner: FileReadBackend) : FileReadBackend {
+        override val name = "scripted"
+        var listOverride: (String) -> FsResult<DirListing>? = { null }
+        var statOverride: (String) -> FsResult<FsStat>? = { null }
+        var sizeOverride: (String) -> FsResult<SizeResult>? = { null }
+        override suspend fun lstat(path: String): FsResult<FsStat> = statOverride(path) ?: inner.lstat(path)
+        override suspend fun list(path: String): FsResult<DirListing> = listOverride(path) ?: inner.list(path)
+        override suspend fun directorySize(path: String): FsResult<SizeResult> = sizeOverride(path) ?: inner.directorySize(path)
+    }
+
+    @Test fun `a listing that fails is reported as incomplete, not as nothing to clean`() = runTest {
+        fs.file("$storage/Android/data/com.example/cache/a.bin", 50)
+        fs.file("$storage/Android/data/com.gone.game/files/save.dat", 10)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.example"))
+        val failures = listOf(
+            FsResult.Unavailable("Shizuku is not running"), FsResult.Denied("refused"),
+            FsResult.Failed("i/o error"), FsResult.NotFound
+        )
+        for (failure in failures) {
+            val b = ScriptedBackend(backend).also { it.listOverride = { failure } }
+            val cache = CacheScanner(b, inv, storage)
+            assertThat(cache.found()).isEmpty()
+            assertThat(cache.incompleteReasons().joinToString()).contains("Android/data could not be listed")
+            val corpse = CorpseScanner(b, inv, storage, { now })
+            assertThat(corpse.found()).isEmpty()
+            assertThat(corpse.incompleteReasons()).hasSize(2) // data and obb
+        }
+        val unavailable = ScriptedBackend(backend).also { it.listOverride = { FsResult.Unavailable("Shizuku is not running") } }
+        val c = CacheScanner(unavailable, inv, storage)
+        c.found()
+        assertThat(c.incompleteReasons().joinToString()).contains("Shizuku is not running")
+    }
+
+    @Test fun `a healthy scan reports nothing missing and a later healthy scan forgets an earlier failure`() = runTest {
+        fs.file("$storage/Android/data/com.example/cache/a.bin", 50)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.example"))
+        val b = ScriptedBackend(backend)
+        val scanner = CacheScanner(b, inv, storage)
+        b.listOverride = { FsResult.Unavailable("down") }
+        scanner.found()
+        assertThat(scanner.incompleteReasons()).isNotEmpty()
+        b.listOverride = { null }
+        assertThat(scanner.found()).hasSize(1)
+        assertThat(scanner.incompleteReasons()).isEmpty()
+    }
+
+    @Test fun `an unreadable package list is reported too, not just ignored`() = runTest {
+        fs.file("$storage/Android/data/com.example/cache/a.bin", 50)
+        val scanner = CacheScanner(backend, FakeInventory(null), storage)
+        assertThat(scanner.found()).isEmpty()
+        assertThat(scanner.incompleteReasons().joinToString()).contains("installed apps")
+    }
+
+    @Test fun `losing the service halfway keeps what was found and says the scan stopped early`() = runTest {
+        fs.file("$storage/Android/data/com.a/cache/a.bin", 50)
+        fs.file("$storage/Android/data/com.b/cache/b.bin", 70)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.a", "com.b"))
+        val b = ScriptedBackend(backend).also {
+            it.sizeOverride = { path -> if ("com.b" in path) FsResult.Unavailable("Shizuku service stopped") else null }
+        }
+        val scanner = CacheScanner(b, inv, storage)
+        val items = scanner.found()
+        assertThat(items.map { it.owningPackage }).containsExactly("com.a")
+        assertThat(scanner.incompleteReasons().joinToString()).contains("stopped early")
+    }
+
+    @Test fun `caches that cannot be examined are counted and skipped`() = runTest {
+        fs.file("$storage/Android/data/com.a/cache/a.bin", 50)
+        fs.file("$storage/Android/data/com.b/cache/b.bin", 70)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.a", "com.b"))
+        val b = ScriptedBackend(backend).also {
+            it.statOverride = { path -> if ("com.b" in path) FsResult.Denied("refused") else null }
+        }
+        val scanner = CacheScanner(b, inv, storage)
+        assertThat(scanner.found().map { it.owningPackage }).containsExactly("com.a")
+        assertThat(scanner.incompleteReasons().joinToString()).contains("could not be examined or measured")
+    }
+
+    @Test fun `sizes are measured or a lower bound, and the item says which`() = runTest {
+        fs.file("$storage/Android/data/com.a/cache/a.bin", 50)
+        fs.file("$storage/Android/data/com.b/cache/b.bin", 70)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.a", "com.b"))
+        val b = ScriptedBackend(backend).also {
+            it.sizeOverride = { path -> if ("com.a" in path) FsResult.Ok(SizeResult(500L, false, 2)) else null }
+        }
+        val items = CacheScanner(b, inv, storage).found()
+        val a = items.first { it.owningPackage == "com.a" }
+        val bItem = items.first { it.owningPackage == "com.b" }
+        assertThat(a.sizeBytes).isEqualTo(500L)
+        assertThat(a.sizeQuality).isEqualTo(SizeQuality.LOWER_BOUND)
+        assertThat(a.unreadableCount).isEqualTo(2)
+        assertThat(a.reasonForFlagging).contains("lower bound")
+        assertThat(bItem.sizeBytes).isEqualTo(70L)
+        assertThat(bItem.sizeQuality).isEqualTo(SizeQuality.MEASURED)
+        assertThat(bItem.unreadableCount).isEqualTo(0)
+    }
+
+    @Test fun `a cache that could not be looked into is neither listed as cleanable nor treated as empty`() = runTest {
+        fs.file("$storage/Android/data/com.a/cache/a.bin", 50)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.a"))
+        val b = ScriptedBackend(backend).also { it.sizeOverride = { FsResult.Ok(SizeResult(0L, true, 1)) } }
+        val scanner = CacheScanner(b, inv, storage)
+        assertThat(scanner.found()).isEmpty()
+        assertThat(scanner.incompleteReasons().joinToString()).contains("could not be examined or measured")
+    }
+
+    @Test fun `a truncated Android data listing is flagged as incomplete`() = runTest {
+        fs.file("$storage/Android/data/com.example/cache/a.bin", 50)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.example"))
+        val b = ScriptedBackend(backend).also {
+            it.listOverride = { path ->
+                if (path.endsWith("/Android/data")) FsResult.Ok(DirListing(listOf("com.example"), truncated = true)) else null
+            }
+        }
+        val scanner = CacheScanner(b, inv, storage)
+        assertThat(scanner.found()).hasSize(1)
+        assertThat(scanner.incompleteReasons().joinToString()).contains("more folders than could be listed")
+    }
+
+    @Test fun `a package whose install state cannot be determined is skipped and reported, in both scanners`() = runTest {
+        val inner = FakeInventory(FakeInventory.defaultPackages("com.example", "com.flaky.cache"))
+        val inv = object : PackageInventory by inner {
+            override fun installState(packageName: String): InstallState =
+                if (packageName.startsWith("com.flaky")) InstallState.UNKNOWN else inner.installState(packageName)
+        }
+        fs.file("$storage/Android/data/com.flaky.cache/cache/x.bin", 40)    // known to Android, state query fails
+        fs.file("$storage/Android/data/com.flaky.folder/files/x", 40)        // unknown to Android, state query fails
+        fs.file("$storage/Android/data/com.truly.gone/files/x", 40)          // authoritatively unknown: a leftover
+
+        val cache = CacheScanner(backend, inv, storage)
+        assertThat(cache.found()).isEmpty()
+        assertThat(cache.incompleteReasons().joinToString()).contains("could not be classified")
+
+        val corpse = CorpseScanner(backend, inv, storage, { now })
+        assertThat(corpse.found().map { it.owningPackage }).containsExactly("com.truly.gone")
+        assertThat(corpse.incompleteReasons().joinToString()).contains("could not be matched")
+    }
+
+    @Test fun `a folder spelled differently from a known package is still that package and never a leftover`() = runTest {
+        fs.file("$storage/Android/data/COM.Known.Game/files/x", 40)
+        val inv = FakeInventory(FakeInventory.defaultPackages("com.known.game"))
         assertThat(CorpseScanner(backend, inv, storage, { now }).found()).isEmpty()
     }
 }

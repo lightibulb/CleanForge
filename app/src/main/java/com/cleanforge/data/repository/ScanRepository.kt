@@ -20,6 +20,9 @@ sealed interface ScanProgress {
     data class ScannerStarted(val name: String, val index: Int, val total: Int) : ScanProgress
     data class ScannerSkipped(val name: String, val reason: String) : ScanProgress
     data class ScannerFailed(val name: String, val reason: String) : ScanProgress
+
+    /** The scanner ran, but its result is incomplete (see [Scanner.incompleteReasons]). Not the same as "found nothing". */
+    data class ScannerIncomplete(val name: String, val reasons: List<String>) : ScanProgress
     data class Finished(val totalItems: Int) : ScanProgress
 }
 
@@ -44,7 +47,7 @@ class ScanRepository @Inject constructor(
         val selected = scanners.filter { it.mode == mode }
         emit(ScanProgress.Started(selected.size))
         for ((index, scanner) in selected.withIndex()) {
-            val missing = missing(scanner.requirement)
+            val missing = missing(scanner)
             if (missing != null) {
                 results.update { it - scanner.id }
                 publish()
@@ -53,9 +56,11 @@ class ScanRepository @Inject constructor(
             }
             emit(ScanProgress.ScannerStarted(scanner.displayName, index + 1, selected.size))
             val found = ArrayList<ScanItem>()
+            var reasons: List<String> = emptyList()
             try {
                 scanner.scan().collect { found += it }
                 results.update { it + (scanner.id to found.toList()) }
+                reasons = scanner.incompleteReasons()
             } catch (ce: CancellationException) {
                 throw ce
             } catch (t: Throwable) {
@@ -63,6 +68,7 @@ class ScanRepository @Inject constructor(
                 emit(ScanProgress.ScannerFailed(scanner.displayName, t.message ?: t.javaClass.simpleName))
             }
             publish()
+            if (reasons.isNotEmpty()) emit(ScanProgress.ScannerIncomplete(scanner.displayName, reasons))
         }
         emit(ScanProgress.Finished(_items.value.size))
     }
@@ -73,11 +79,21 @@ class ScanRepository @Inject constructor(
         publish()
     }
 
-    private fun missing(req: Requirement): String? = when (req) {
+    /** Null if the scanner may run; otherwise the actionable reason it cannot. */
+    private suspend fun missing(scanner: Scanner): String? = when (scanner.requirement) {
         Requirement.NONE -> null
         Requirement.ALL_FILES_ACCESS ->
             if (capabilities.hasAllFilesAccess()) null else "needs All-files access"
-        Requirement.SHIZUKU ->
-            if (capabilities.shizukuAuthorized()) null else "needs Shizuku"
+        Requirement.SHIZUKU -> {
+            // Ask per operation: a live Shizuku binder does not prove that listing or measuring works.
+            val blocked = scanner.privilegedOperations
+                .map { capabilities.readiness(it) }
+                .firstOrNull { !it.canAttempt }
+            when {
+                blocked != null -> blocked.reason
+                scanner.privilegedOperations.isEmpty() && !capabilities.shizukuAuthorized() -> "needs Shizuku"
+                else -> null
+            }
+        }
     }
 }

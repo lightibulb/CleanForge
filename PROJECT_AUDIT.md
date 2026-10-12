@@ -195,3 +195,36 @@ Original sources were at the project root; all code now lives under `app/src/mai
 **Tests (new, under `app/src/test/java/com/cleanforge/`):** `core/SafeDeleterTest.kt`, `core/SafetyValidatorTest.kt`, `core/PlanBuilderTest.kt`, `core/CleaningEngineTest.kt`, `core/ScannerEvidenceTest.kt`, `core/PolicyGuardTest.kt`, `testutil/Fixtures.kt`. The two original test classes were replaced.
 
 **Docs (new):** `PROJECT_AUDIT.md`, `README.md`, `BUILD.md`, `SECURITY.md`, `CHANGELOG.md`.
+
+## 15. Final status (post Part 5)
+
+| Check | Status |
+|-------|--------|
+| Part 1: Audit & Refactor | ✅ Complete |
+| Part 2: Shizuku Engine | ✅ Complete |
+| Part 3: Storage Forensics | ✅ Complete |
+| Part 4: RAM Monitoring | ✅ Complete |
+| Part 5: UI/UX & CI/CD | Pending|
+| Compile verified | ⚠️ Pending first CI run |
+| On-device test | ⚠️ Pending (Vivo Y11, Android 11) |
+
+### Files added across all parts
+
+| Part | New files |
+|------|-----------|
+| 1 | 17 source + 7 test + 5 docs |
+| 2 | 10 source + Shizuku tests + `docs/SHIZUKU_CAPABILITY_MATRIX.md` |
+| 3 | 5 forensic scanners + `FORENSIC_MEDIA` enum + validator allowlist + `docs/FORENSICS_MATRIX.md` |
+| 4 | 4 memory source + 2 use cases + ViewModel + screen + 2 test classes + `docs/RAM_MONITORING.md` |
+| 5 | CI pipeline, Gradle wrapper, UI polish, `docs/ARCHITECTURE.md` |
+
+### Still open before "safe to use"
+- Generate and commit the Gradle wrapper; get one green CI run (tests, lint, both APKs).
+- Device checks on Android 11 with and without Shizuku, including the forensic allowlist paths.
+- Confirm the RAM clear behaviour on the target device.
+
+### Decisions still only Aman can make
+1. Licence (GPL-3.0-or-later or Apache-2.0). Add `LICENSE`.
+2. Application id (currently `com.cleanforge`) before the first public release.
+3. Security contact in `SECURITY.md`.
+4. Whether to restore removed features (per-app storage, internal-cache clearing).

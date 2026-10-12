@@ -5,12 +5,21 @@ import com.cleanforge.core.backend.AndroidCapabilities
 import com.cleanforge.core.backend.AndroidPackageInventory
 import com.cleanforge.core.backend.Capabilities
 import com.cleanforge.core.backend.FileOperationBackend
+import com.cleanforge.core.backend.FileReadBackend
 import com.cleanforge.core.backend.PackageInventory
 import com.cleanforge.core.backend.ShizukuFileBackend
 import com.cleanforge.core.backend.StandardFileBackend
 import com.cleanforge.core.cleaning.CleaningEngine
 import com.cleanforge.core.fs.AndroidFsOps
 import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.memory.AndroidBackgroundProcessKiller
+import com.cleanforge.core.memory.BackgroundProcessKiller
+import com.cleanforge.core.memory.MemoryInfoProvider
+import com.cleanforge.core.memory.ProcMemInfoProvider
+import com.cleanforge.core.privileged.CapabilityRegistry
+import com.cleanforge.core.privileged.DefaultPrivilegedExecutor
+import com.cleanforge.core.privileged.PrivilegedExecutor
+import com.cleanforge.core.privileged.PrivilegedSessionProvider
 import com.cleanforge.core.safety.SafetyValidator
 import com.cleanforge.core.scanner.ApkScanner
 import com.cleanforge.core.scanner.CacheScanner
@@ -20,8 +29,10 @@ import com.cleanforge.core.scanner.EmptyDirectoryScanner
 import com.cleanforge.core.scanner.LargeFileScanner
 import com.cleanforge.core.scanner.LogScanner
 import com.cleanforge.core.scanner.Scanner
+import com.cleanforge.core.scanner.TelegramScanner
 import com.cleanforge.core.scanner.TempScanner
 import com.cleanforge.core.scanner.ThumbnailScanner
+import com.cleanforge.core.scanner.WhatsAppScanner
 import com.cleanforge.core.shizuku.ShizukuFileServiceConnector
 import com.cleanforge.core.shizuku.ShizukuManager
 import dagger.Module
@@ -33,8 +44,8 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 /**
- * Everything is constructed explicitly here: the two FileOperationBackend instances differ only by
- * qualifier, and doing it by hand removes any chance of an ambiguous/missing Hilt binding.
+ * Everything is constructed explicitly here: doing it by hand removes any chance of an ambiguous/missing Hilt binding.
+ * Privileged work has ONE entry point, [PrivilegedExecutor]; the "shizuku" read backend is a thin view over it.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -46,29 +57,45 @@ object AppModule {
     @Provides @Singleton @Named("standard")
     fun provideStandardBackend(fs: FsOps): FileOperationBackend = StandardFileBackend(fs)
 
+    @Provides @Singleton
+    fun provideSessionProvider(connector: ShizukuFileServiceConnector): PrivilegedSessionProvider = connector
+
+    @Provides @Singleton
+    fun provideCapabilityRegistry(
+        manager: ShizukuManager,
+        provider: PrivilegedSessionProvider
+    ): CapabilityRegistry = CapabilityRegistry(manager, provider)
+
+    @Provides @Singleton
+    fun providePrivilegedExecutor(
+        provider: PrivilegedSessionProvider,
+        registry: CapabilityRegistry
+    ): PrivilegedExecutor = DefaultPrivilegedExecutor(provider, registry)
+
     @Provides @Singleton @Named("shizuku")
-    fun provideShizukuBackend(connector: ShizukuFileServiceConnector): FileOperationBackend =
-        ShizukuFileBackend(connector)
+    fun provideShizukuBackend(executor: PrivilegedExecutor): FileReadBackend = ShizukuFileBackend(executor)
 
     @Provides @Singleton
     fun providePackageInventory(@ApplicationContext ctx: Context): PackageInventory = AndroidPackageInventory(ctx)
 
     @Provides @Singleton
-    fun provideCapabilities(shizuku: ShizukuManager): Capabilities = AndroidCapabilities(shizuku)
+    fun provideCapabilities(shizuku: ShizukuManager, registry: CapabilityRegistry): Capabilities =
+        AndroidCapabilities(shizuku, registry)
 
     @Provides @Singleton
     fun provideCleaningEngine(
         safety: SafetyValidator,
         @Named("standard") standard: FileOperationBackend,
-        @Named("shizuku") shizuku: FileOperationBackend,
+        privileged: PrivilegedExecutor,
         inventory: PackageInventory,
         capabilities: Capabilities
-    ): CleaningEngine = CleaningEngine(safety, standard, shizuku, inventory, capabilities)
+    ): CleaningEngine = CleaningEngine(safety, standard, privileged, inventory, capabilities)
 
     @Provides @Singleton
     fun provideScanners(
         fs: FsOps,
-        @Named("shizuku") shizuku: FileOperationBackend,
+        @Named("standard") standard: FileOperationBackend,
+        @Named("shizuku") shizuku: FileReadBackend,
         inventory: PackageInventory
     ): Set<@JvmSuppressWildcards Scanner> = setOf(
         CacheScanner(shizuku, inventory),
@@ -79,6 +106,18 @@ object AppModule {
         LargeFileScanner(fs),
         DuplicateScanner(fs),
         LogScanner(fs),
-        EmptyDirectoryScanner(fs)
+        EmptyDirectoryScanner(fs),
+        // Part 3 forensics. Android/media is reachable with All-files access, so these use the standard backend.
+        // TikTok/TwitterX/Instagram scanners are NOT registered: the Shizuku service has no single-file delete, so
+        // their items could never be removed (CacheScanner already covers cache/). See TikTokScanner.
+        WhatsAppScanner(standard, inventory),
+        TelegramScanner(standard, inventory)
     )
+
+    @Provides @Singleton
+    fun provideBackgroundProcessKiller(@ApplicationContext context: Context): BackgroundProcessKiller =
+        AndroidBackgroundProcessKiller(context)
+
+    @Provides @Singleton
+    fun provideMemoryInfoProvider(): MemoryInfoProvider = ProcMemInfoProvider()
 }

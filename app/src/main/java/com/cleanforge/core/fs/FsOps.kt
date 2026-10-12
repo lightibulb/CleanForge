@@ -27,6 +27,20 @@ data class FsStat(
     }
 }
 
+/** lstat that tells "does not exist" apart from "could not be examined". */
+sealed interface FsProbe {
+    data class Found(val stat: FsStat) : FsProbe
+
+    /** ENOENT / ENOTDIR: a real answer, the entry is not there. */
+    data object Missing : FsProbe
+
+    /** EACCES / EPERM: the entry may exist but this process may not look at it. */
+    data object Denied : FsProbe
+
+    /** Any other failure. */
+    data object Error : FsProbe
+}
+
 /**
  * The only filesystem surface the cleaning code is allowed to use.
  * Implementations MUST NOT follow symlinks and MUST NOT recurse.
@@ -34,6 +48,12 @@ data class FsStat(
 interface FsOps {
     /** lstat. Null if the entry does not exist or cannot be examined. */
     fun lstat(path: String): FsStat?
+
+    /**
+     * Like [lstat] but keeps the failure reason. The default cannot tell the cases apart and reports [FsProbe.Missing];
+     * implementations that can (the real one) override it.
+     */
+    fun probe(path: String): FsProbe = lstat(path)?.let { FsProbe.Found(it) } ?: FsProbe.Missing
 
     /** Child names (never paths). Null if [path] cannot be listed. */
     fun list(path: String): List<String>?
@@ -47,7 +67,15 @@ data class WalkLimits(
     val maxEntries: Int = 200_000
 )
 
-data class SizeResult(val bytes: Long, val complete: Boolean)
+/**
+ * Measured logical size (sum of st_size of regular files, NOT allocated blocks).
+ * [complete] is false when a safety bound cut the walk short; [unreadable] counts directories that could not be
+ * listed (their contents are missing from [bytes]). Either one means [bytes] is a lower bound, never an exact figure.
+ */
+data class SizeResult(val bytes: Long, val complete: Boolean, val unreadable: Int = 0) {
+    /** True only if nothing was cut off and nothing was unreadable. */
+    val isExact: Boolean get() = complete && unreadable == 0
+}
 
 enum class DeleteMode(val code: Int) {
     /** One regular file. */
@@ -75,7 +103,16 @@ enum class DeleteStatus(val code: Int) {
     WRONG_TYPE(4),
     FAILED(5),
     PARTIAL(6),
-    LIMIT_EXCEEDED(7);
+    LIMIT_EXCEEDED(7),
+
+    /** The user (or a timeout policy) stopped the operation between entries. Some entries may already be gone. */
+    CANCELLED(8),
+
+    /** Produced on the app side only: the privileged channel was not usable, so nothing is known to have happened. */
+    UNAVAILABLE(9),
+
+    /** Produced on the app side only: the call did not return in time; the outcome is unknown. */
+    TIMED_OUT(10);
 
     companion object {
         fun fromCode(code: Int): DeleteStatus = entries.firstOrNull { it.code == code } ?: FAILED

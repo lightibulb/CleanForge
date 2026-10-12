@@ -18,7 +18,8 @@ enum class CleaningCategory(val label: String, val isQuick: Boolean) {
     LARGE_FILE("Large files", false),
     DUPLICATE("Duplicate files", false),
     LOG_FILE("Old log files", false),
-    EMPTY_DIRECTORY("Empty folders", false)
+    EMPTY_DIRECTORY("Empty folders", false),
+    FORENSIC_MEDIA("App-specific media & caches", false)
 }
 
 enum class Reversibility {

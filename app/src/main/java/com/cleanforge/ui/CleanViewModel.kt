@@ -9,9 +9,12 @@ import com.cleanforge.core.cleaning.CleaningProgress
 import com.cleanforge.core.cleaning.PlanBuilder
 import com.cleanforge.core.model.CleaningPlan
 import com.cleanforge.core.model.CleaningReport
+import com.cleanforge.core.model.ItemOutcome
 import com.cleanforge.core.model.ItemStatus
 import com.cleanforge.core.model.ScanItem
 import com.cleanforge.core.model.confirmedByUser
+import com.cleanforge.core.privileged.CapabilityRegistry
+import com.cleanforge.core.privileged.CapabilityReport
 import com.cleanforge.core.scanner.ScanMode
 import com.cleanforge.core.shizuku.ShizukuManager
 import com.cleanforge.core.shizuku.ShizukuState
@@ -35,7 +38,9 @@ data class CleaningUi(
     val total: Int = 0,
     val freedBytes: Long = 0L,
     val current: String = "",
-    val report: CleaningReport? = null
+    val report: CleaningReport? = null,
+    /** The user pressed Stop; the run ends after the item in flight. */
+    val stopping: Boolean = false
 )
 
 data class CleanUiState(
@@ -43,8 +48,12 @@ data class CleanUiState(
     val totalBytes: Long = 0L,
     val hasAllFilesAccess: Boolean = false,
     val shizuku: ShizukuState = ShizukuState.NotRunning,
+    /** Per-operation capability, as probed. Null until the first probe finished. */
+    val capabilities: CapabilityReport? = null,
     val scanning: Boolean = false,
     val scanLabel: String = "",
+    /** True once a scan has finished, so "no results" can be told apart from "never scanned". */
+    val scanned: Boolean = false,
     val notices: List<String> = emptyList(),
     val items: List<ScanItem> = emptyList(),
     val selected: Set<String> = emptySet(),
@@ -64,13 +73,15 @@ class CleanViewModel @Inject constructor(
     private val planBuilder: PlanBuilder,
     private val executePlan: ExecuteCleaningPlanUseCase,
     private val shizuku: ShizukuManager,
-    private val capabilities: Capabilities
+    private val capabilities: Capabilities,
+    private val registry: CapabilityRegistry
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CleanUiState())
     val ui: StateFlow<CleanUiState> = _ui.asStateFlow()
 
     private var scanJob: Job? = null
+    private var cleanJob: Job? = null
 
     init {
         refreshDevice()
@@ -78,16 +89,36 @@ class CleanViewModel @Inject constructor(
             shizuku.state.collect { st -> _ui.update { it.copy(shizuku = st) } }
         }
         viewModelScope.launch {
+            registry.report.collect { r -> _ui.update { it.copy(capabilities = r) } }
+        }
+        viewModelScope.launch {
             repository.items.collect { items ->
                 val present = items.mapTo(HashSet<String>()) { it.path }
                 _ui.update { s -> s.copy(items = items, selected = s.selected.filterTo(HashSet<String>()) { it in present }) }
             }
         }
+        recheckShizuku()
     }
 
     fun onResume() {
-        shizuku.refresh()
+        recheckShizuku()
         refreshDevice()
+    }
+
+    /** Re-reads Shizuku and re-probes capabilities. Binder calls: always off the main thread. */
+    fun recheckShizuku() {
+        viewModelScope.launch(Dispatchers.IO) {
+            shizuku.refresh()
+            registry.probe()
+        }
+    }
+
+    /** The "Check again" button: a probe that ignores the recent-result shortcut. */
+    fun forceRecheckShizuku() {
+        viewModelScope.launch(Dispatchers.IO) {
+            shizuku.refresh()
+            registry.probe(force = true)
+        }
     }
 
     private fun refreshDevice() {
@@ -112,6 +143,7 @@ class CleanViewModel @Inject constructor(
         _ui.update { it.copy(scanning = true, scanLabel = "Starting…", notices = emptyList()) }
         scanJob = viewModelScope.launch {
             val notices = ArrayList<String>()
+            var finished = false
             try {
                 scanDevice(mode).collect { p ->
                     when (p) {
@@ -119,6 +151,9 @@ class CleanViewModel @Inject constructor(
                             _ui.update { it.copy(scanLabel = "${p.name} (${p.index}/${p.total})") }
                         is ScanProgress.ScannerSkipped -> notices += "${p.name}: ${p.reason}"
                         is ScanProgress.ScannerFailed -> notices += "${p.name} failed: ${p.reason}"
+                        is ScanProgress.ScannerIncomplete ->
+                            notices += "${p.name} is incomplete: ${p.reasons.joinToString("; ")}"
+                        is ScanProgress.Finished -> finished = true
                         else -> Unit
                     }
                 }
@@ -128,7 +163,14 @@ class CleanViewModel @Inject constructor(
             } catch (t: Throwable) {
                 notices += "Scan failed: ${t.message ?: t.javaClass.simpleName}"
             } finally {
-                _ui.update { it.copy(scanning = false, scanLabel = "", notices = notices.toList()) }
+                _ui.update {
+                    it.copy(
+                        scanning = false,
+                        scanLabel = "",
+                        scanned = it.scanned || finished,
+                        notices = notices.toList()
+                    )
+                }
             }
         }
     }
@@ -176,46 +218,97 @@ class CleanViewModel @Inject constructor(
             return
         }
         _ui.update { it.copy(plan = null, cleaning = CleaningUi(total = plan.items.size)) }
-        viewModelScope.launch {
+        cleanJob = viewModelScope.launch {
+            val outcomes = ArrayList<ItemOutcome>()
+            var inFlight: ScanItem? = null
+            var completed = false
+            var stoppedBecause = "the cleanup was stopped"
             try {
                 executePlan(plan.confirmedByUser()).collect { p ->
                     when (p) {
-                        is CleaningProgress.Progress ->
-                            _ui.update { it.copy(cleaning = CleaningUi(p.done, p.total, p.freedBytes, p.currentName)) }
-                        is CleaningProgress.Completed -> {
-                            val gone = p.report.outcomes
-                                .filter { it.status == ItemStatus.DELETED }
-                                .mapTo(HashSet<String>()) { it.item.path }
-                            repository.forget(gone)
+                        is CleaningProgress.ItemStarted -> inFlight = p.item
+                        is CleaningProgress.Progress -> {
+                            p.outcome?.let { outcomes += it }
+                            inFlight = null
                             _ui.update {
                                 it.copy(
-                                    selected = it.selected - gone,
-                                    cleaning = CleaningUi(total = p.report.attempted, report = p.report)
+                                    cleaning = (it.cleaning ?: CleaningUi(total = p.total)).copy(
+                                        done = p.done,
+                                        total = p.total,
+                                        freedBytes = p.freedBytes,
+                                        current = p.currentName
+                                    )
                                 )
                             }
-                            refreshDevice()
+                        }
+                        is CleaningProgress.Completed -> {
+                            completed = true
+                            applyReport(p.report)
                         }
                         else -> Unit
                     }
                 }
             } catch (ce: CancellationException) {
+                stoppedBecause = "you stopped the cleanup"
                 throw ce
             } catch (t: Throwable) {
-                _ui.update {
-                    it.copy(
-                        cleaning = null,
-                        notices = it.notices + "Cleaning stopped: ${t.message ?: t.javaClass.simpleName}"
-                    )
-                }
+                stoppedBecause = "the cleanup stopped (${t.message ?: t.javaClass.simpleName})"
+                _ui.update { it.copy(notices = it.notices + "Cleaning stopped: ${t.message ?: t.javaClass.simpleName}") }
+            } finally {
+                if (!completed) applyReport(partialReport(plan, outcomes, inFlight, stoppedBecause))
             }
         }
+    }
+
+    /** Stops after the item in flight. Whatever was already done is reported; nothing is guessed. */
+    fun cancelClean() {
+        _ui.update { it.copy(cleaning = it.cleaning?.copy(stopping = true)) }
+        cleanJob?.cancel()
+    }
+
+    /**
+     * A stopped or failed run still gets an honest report: finished items keep their outcome, the item that was in
+     * flight is UNVERIFIED (it may or may not have been touched), and the rest are marked not attempted.
+     */
+    private fun partialReport(plan: CleaningPlan, outcomes: List<ItemOutcome>, inFlight: ScanItem?, why: String): CleaningReport {
+        val reported = outcomes.mapTo(HashSet<String>()) { it.item.path }
+        val all = ArrayList<ItemOutcome>(outcomes)
+        if (inFlight != null && inFlight.path !in reported) {
+            all += ItemOutcome(
+                inFlight,
+                ItemStatus.UNVERIFIED,
+                "Stopped while this item was being cleaned ($why). It may be partly or fully cleaned. Scan again to see what is left."
+            )
+            reported += inFlight.path
+        }
+        for (item in plan.items) {
+            if (item.path !in reported) all += ItemOutcome(item, ItemStatus.SKIPPED, "Not attempted: $why")
+        }
+        return CleaningReport(all)
+    }
+
+    private fun applyReport(report: CleaningReport) {
+        val gone = report.outcomes
+            .filter { it.status == ItemStatus.DELETED }
+            .mapTo(HashSet<String>()) { it.item.path }
+        repository.forget(gone)
+        _ui.update {
+            it.copy(
+                selected = it.selected - gone,
+                cleaning = CleaningUi(total = report.attempted, report = report)
+            )
+        }
+        refreshDevice()
     }
 
     fun dismissReport() {
         _ui.update { it.copy(cleaning = null) }
     }
 
+    /** Shows the permission dialog only when it can appear; a "don't ask again" denial needs the Shizuku app. */
     fun requestShizukuPermission() {
-        shizuku.requestPermission()
+        viewModelScope.launch(Dispatchers.IO) {
+            shizuku.requestPermission()
+        }
     }
 }

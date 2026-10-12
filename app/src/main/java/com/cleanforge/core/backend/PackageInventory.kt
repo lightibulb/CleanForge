@@ -15,6 +15,24 @@ const val MIN_PLAUSIBLE_PACKAGES = 20
 data class ArchiveInfo(val packageName: String, val versionCode: Long)
 
 /**
+ * What Android says about ONE package name for the current user/profile. A folder under Android/data is never evidence
+ * for any of these: the answer comes only from the package manager.
+ */
+enum class InstallState {
+    /** Installed right now. */
+    INSTALLED,
+
+    /** Uninstalled but Android kept its data: it has an identity, but it is not installed. */
+    UNINSTALLED_DATA_KEPT,
+
+    /** The package manager has no record of this name for this user (authoritative "not found"). */
+    NOT_KNOWN,
+
+    /** The query failed for any other reason. NOT the same as "not installed": callers must fail closed. */
+    UNKNOWN
+}
+
+/**
  * What the OS knows about apps, for the CURRENT Android user/profile only (other users and work profiles are
  * not enumerated). Never inferred from folder names.
  *
@@ -36,6 +54,23 @@ interface PackageInventory {
      * known (uninstalled with data kept) is NOT installed. Fails closed: any error answers false.
      */
     fun isCurrentlyInstalled(packageName: String): Boolean
+
+    /**
+     * The authoritative per-package answer. Which way to fail closed depends on the caller (a cache is only cleared
+     * for INSTALLED, a leftover is only removed for NOT_KNOWN), so a failed query is [InstallState.UNKNOWN] and never
+     * silently becomes "not installed".
+     *
+     * The default derives the answer from the two methods above and is meant for fakes; [AndroidPackageInventory]
+     * overrides it with a single package-manager lookup.
+     */
+    fun installState(packageName: String): InstallState {
+        val known = knownPackageNames() ?: return InstallState.UNKNOWN
+        return when {
+            isCurrentlyInstalled(packageName) -> InstallState.INSTALLED
+            packageName in known -> InstallState.UNINSTALLED_DATA_KEPT
+            else -> InstallState.NOT_KNOWN
+        }
+    }
 
     fun installedVersionCode(packageName: String): Long?
 
@@ -74,6 +109,26 @@ class AndroidPackageInventory(context: Context) : PackageInventory {
         pm.getPackageInfo(packageName, 0).longVersionCode
     } catch (e: Exception) {
         null
+    }
+
+    /**
+     * One lookup WITH MATCH_UNINSTALLED_PACKAGES: found + FLAG_INSTALLED = installed, found without it = uninstalled
+     * with data kept. NameNotFoundException is the platform's authoritative "no such package for this user"; every
+     * other failure (remote errors while system_server restarts, security errors) is UNKNOWN, not "not installed".
+     */
+    @Suppress("DEPRECATION")
+    override fun installState(packageName: String): InstallState = try {
+        val info = pm.getPackageInfo(packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+        val app: ApplicationInfo? = info.applicationInfo
+        when {
+            info.packageName != packageName || app == null -> InstallState.UNKNOWN
+            (app.flags and ApplicationInfo.FLAG_INSTALLED) != 0 -> InstallState.INSTALLED
+            else -> InstallState.UNINSTALLED_DATA_KEPT
+        }
+    } catch (e: PackageManager.NameNotFoundException) {
+        InstallState.NOT_KNOWN
+    } catch (e: Exception) {
+        InstallState.UNKNOWN
     }
 
     @Suppress("DEPRECATION")

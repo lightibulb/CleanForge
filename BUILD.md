@@ -74,8 +74,10 @@ Library versions were chosen without registry access (AGP 8.7.2, Kotlin 2.0.21, 
 
 The places most likely to need a small adjustment because they touch APIs I could not check against a compiler:
 
-1. `core/shizuku/ShizukuFileServiceConnector.kt`: `Shizuku.UserServiceArgs` builder methods.
-2. `core/shizuku/ShizukuManager.kt`: Shizuku listener signatures.
+1. `core/shizuku/ShizukuFileServiceConnector.kt`: `Shizuku.UserServiceArgs` builder methods, `bindUserService` / `unbindUserService(args, connection, remove)` signatures.
+2. `core/shizuku/ShizukuManager.kt`: Shizuku listener signatures, `getVersion()`, `shouldShowRequestPermissionRationale()`.
+2a. `aidl/.../IFileService.aidl`: the `in String[]` argument and the appended methods 6 to 12 must generate cleanly.
+2b. `core/shizuku/AidlPrivilegedFileApi.kt`: `DeadObjectException`, `TransactionTooLargeException`, `RemoteException` handling.
 3. `di/AppModule.kt` and the `@HiltViewModel`: Hilt/KSP generation errors are verbose; fix the first one listed.
 4. `ui/*`: Material 3 parameter names if you bump the Compose BOM.
 5. `app/src/main/aidl/.../IFileService.aidl`: explicit transaction ids (`= 16777114`) need AGP's AIDL support enabled (`buildFeatures.aidl = true`, already set).
@@ -87,3 +89,12 @@ After it compiles, run the tests; a failing test is information about a real beh
 1. Create a throwaway folder in Download with some files and run a Review scan; confirm the dialog lists exactly what you ticked.
 2. With Shizuku running, scan, and confirm that cache and leftover findings appear and that deleting one clears only that app's cache contents.
 3. Try to break it: tick a photo in DCIM, then edit or replace the file before confirming; the report should say it was skipped.
+
+## Shizuku engine tests (Part 2)
+
+`./gradlew :app:testDebugUnitTest` runs, among others, `FileServiceCoreTest`, `WireCodecTest`, `PrivilegedExecutorTest`,
+`CapabilityRegistryTest`, `MaintenanceModelTest`, `ScanRepositoryTest`, the extended `CleaningEngineTest`,
+`ScannerEvidenceTest` and `PolicyGuardTest`. They run the real service logic over a fake filesystem and a fake service.
+`PrivilegedExecutorTest` and `CapabilityRegistryTest` use real time on purpose (deadlines of 150 to 750 ms). They do **not**
+cover Binder, the AIDL stub, `ShizukuFileServiceConnector`, `ShizukuManager` or `AidlPrivilegedFileApi`; those need the
+device checklist in `docs/SHIZUKU_CAPABILITY_MATRIX.md` (section 8).

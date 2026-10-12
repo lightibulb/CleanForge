@@ -81,7 +81,11 @@ fun ConfirmDialog(plan: CleaningPlan, onConfirm: () -> Unit, onDismiss: () -> Un
 @Composable
 private fun PlanSummary(plan: CleaningPlan) {
     Column {
-        Text("Frees about ${formatBytes(plan.totalBytes)}.", fontWeight = FontWeight.SemiBold)
+        Text(
+            (if (plan.hasLowerBoundSizes) "Frees at least ${formatBytes(plan.totalBytes)}" else "Frees about ${formatBytes(plan.totalBytes)}") +
+                " (file sizes, not disk blocks).",
+            fontWeight = FontWeight.SemiBold
+        )
         Spacer(Modifier.height(8.dp))
         if (plan.items.any { it.reversibility == Reversibility.NOT_REVERSIBLE }) {
             Text("Deleted for good: CleanForge has no recycle bin.")
@@ -132,10 +136,10 @@ private fun RefusedBlock(r: RejectedItem) {
 }
 
 @Composable
-fun ProgressDialog(state: CleaningUi) {
+fun ProgressDialog(state: CleaningUi, onStop: () -> Unit) {
     AlertDialog(
         onDismissRequest = { /* not dismissible while deleting */ },
-        title = { Text("Cleaning…") },
+        title = { Text(if (state.stopping) "Stopping…" else "Cleaning…") },
         text = {
             Column {
                 LinearProgressIndicator(
@@ -147,9 +151,17 @@ fun ProgressDialog(state: CleaningUi) {
                 if (state.current.isNotEmpty()) {
                     Text(state.current, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
+                if (state.stopping) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Finishing the item in progress. Anything already removed stays removed.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         },
-        confirmButton = {}
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onStop, enabled = !state.stopping) { Text("Stop") } }
     )
 }
 
@@ -161,8 +173,14 @@ fun ReportDialog(report: CleaningReport, onDismiss: () -> Unit) {
         title = { Text(if (report.fullySuccessful) "All done" else "Finished with issues") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Freed ${formatBytes(report.bytesFreed)}", fontWeight = FontWeight.SemiBold)
-                Text("Deleted ${report.deleted} · skipped ${report.skipped} · failed ${report.failed}")
+                Text("Freed ${formatBytes(report.bytesFreed)} (file sizes reported by the cleaner)", fontWeight = FontWeight.SemiBold)
+                if (report.unconfirmedBytes > 0) {
+                    Text("${formatBytes(report.unconfirmedBytes)} of that could not be confirmed afterwards.")
+                }
+                Text(
+                    "Deleted ${report.deleted} · partly ${report.partial} · unconfirmed ${report.unverified} · " +
+                        "skipped ${report.skipped} · failed ${report.failed}"
+                )
                 val problems = report.outcomes.filter { it.status != ItemStatus.DELETED }
                 if (problems.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))

@@ -14,7 +14,9 @@ class StorageWalker(private val fs: FsOps) {
         root: String,
         limits: WalkLimits = WalkLimits(),
         skipDir: (String) -> Boolean = { false },
-        onTruncated: () -> Unit = {}
+        onTruncated: () -> Unit = {},
+        /** Called once per directory that exists but could not be listed (its contents are NOT part of the walk). */
+        onUnreadable: () -> Unit = {}
     ): Sequence<Entry> = sequence {
         val rootStat = fs.lstat(root)
         if (rootStat == null || rootStat.type != FsType.DIRECTORY) return@sequence
@@ -25,7 +27,11 @@ class StorageWalker(private val fs: FsOps) {
 
         while (stack.isNotEmpty()) {
             val (dir, depth) = stack.removeLast()
-            val names = fs.list(dir) ?: continue
+            val names = fs.list(dir)
+            if (names == null) {
+                onUnreadable()
+                continue
+            }
             for (name in names) {
                 if (!isPlainName(name)) continue
                 count++
@@ -48,17 +54,21 @@ class StorageWalker(private val fs: FsOps) {
         }
     }
 
-    /** Sum of regular-file sizes below [root]. Null if [root] is not a readable directory/file. */
+    /**
+     * Sum of regular-file sizes below [root]. Null if [root] is not a readable directory/file.
+     * Unreadable sub-directories are counted in [SizeResult.unreadable] instead of being skipped silently.
+     */
     fun sizeOf(root: String, limits: WalkLimits = WalkLimits()): SizeResult? {
         val st = fs.lstat(root) ?: return null
         if (st.type == FsType.FILE) return SizeResult(st.size, true)
         if (st.type != FsType.DIRECTORY) return null
         var total = 0L
         var complete = true
-        for (e in walk(root, limits, onTruncated = { complete = false })) {
+        var unreadable = 0
+        for (e in walk(root, limits, onTruncated = { complete = false }, onUnreadable = { unreadable++ })) {
             if (e.stat.type == FsType.FILE) total += e.stat.size
         }
-        return SizeResult(total, complete)
+        return SizeResult(total, complete, unreadable)
     }
 
     companion object {

@@ -1,5 +1,6 @@
 package com.cleanforge.core.fs
 
+import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import java.io.File
@@ -8,16 +9,31 @@ import java.io.File
 object AndroidFsOps : FsOps {
 
     override fun lstat(path: String): FsStat? = try {
-        val st = Os.lstat(path)
+        toStat(Os.lstat(path))
+    } catch (e: Exception) {
+        null
+    }
+
+    override fun probe(path: String): FsProbe = try {
+        FsProbe.Found(toStat(Os.lstat(path)))
+    } catch (e: ErrnoException) {
+        when (e.errno) {
+            OsConstants.ENOENT, OsConstants.ENOTDIR -> FsProbe.Missing
+            OsConstants.EACCES, OsConstants.EPERM -> FsProbe.Denied
+            else -> FsProbe.Error
+        }
+    } catch (e: Exception) {
+        FsProbe.Error
+    }
+
+    private fun toStat(st: android.system.StructStat): FsStat {
         val type = when {
             OsConstants.S_ISLNK(st.st_mode) -> FsType.SYMLINK
             OsConstants.S_ISDIR(st.st_mode) -> FsType.DIRECTORY
             OsConstants.S_ISREG(st.st_mode) -> FsType.FILE
             else -> FsType.OTHER
         }
-        FsStat(type, st.st_size, st.st_mtime * 1000L, st.st_dev, st.st_ino)
-    } catch (e: Exception) {
-        null
+        return FsStat(type, st.st_size, st.st_mtime * 1000L, st.st_dev, st.st_ino)
     }
 
     override fun list(path: String): List<String>? = try {

@@ -16,12 +16,13 @@ import javax.inject.Singleton
 @Singleton
 class ShizukuManager @Inject constructor(
     @ApplicationContext private val context: Context
-) {
+) : ShizukuStateSource {
     private val _state = MutableStateFlow<ShizukuState>(ShizukuState.NotRunning)
-    val state: StateFlow<ShizukuState> = _state
+    override val state: StateFlow<ShizukuState> = _state
 
     private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
     private val binderDead = Shizuku.OnBinderDeadListener { _state.value = ShizukuState.Disconnected }
+    // The connector re-checks liveness on every acquire(), so a dead binder never leaves a stale service behind.
     private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> refresh() }
 
     /** Call once from Application.onCreate. Listeners live as long as the process. */
@@ -38,7 +39,7 @@ class ShizukuManager @Inject constructor(
         runCatching { Shizuku.removeRequestPermissionResultListener(permissionResult) }
     }
 
-    fun refresh() {
+    override fun refresh() {
         _state.value = currentState()
     }
 
@@ -46,13 +47,15 @@ class ShizukuManager @Inject constructor(
         when {
             !Shizuku.pingBinder() ->
                 if (isShizukuAppInstalled()) ShizukuState.NotRunning else ShizukuState.NotInstalled
-            Shizuku.isPreV11() -> ShizukuState.Error("Shizuku v11 or newer is required. Update the Shizuku app.")
+            Shizuku.isPreV11() -> ShizukuState.ServerTooOld
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED ->
-                ShizukuState.Authorized(Shizuku.getUid())
+                ShizukuState.Authorized(Shizuku.getUid(), Shizuku.getVersion())
+            // Per the Shizuku API demo: true means the user chose "Deny and don't ask again".
+            Shizuku.shouldShowRequestPermissionRationale() -> ShizukuState.PermissionPermanentlyDenied
             else -> ShizukuState.PermissionDenied
         }
-    } catch (t: Throwable) {
-        ShizukuState.Error(t.message ?: "Unknown Shizuku error")
+    } catch (e: Exception) {
+        ShizukuState.Error(e.message ?: "Unknown Shizuku error")
     }
 
     @Suppress("DEPRECATION")
@@ -73,9 +76,14 @@ class ShizukuManager @Inject constructor(
                 refresh()
                 return
             }
+            if (Shizuku.shouldShowRequestPermissionRationale()) {
+                // "Don't ask again": requesting would show nothing. The UI tells the user to open Shizuku instead.
+                refresh()
+                return
+            }
             Shizuku.requestPermission(requestCode)
-        } catch (t: Throwable) {
-            _state.value = ShizukuState.Error(t.message ?: "Permission request failed")
+        } catch (e: Exception) {
+            _state.value = ShizukuState.Error(e.message ?: "Permission request failed")
         }
     }
 

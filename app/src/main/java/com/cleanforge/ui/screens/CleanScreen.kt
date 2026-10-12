@@ -54,8 +54,10 @@ fun CleanScreen(vm: CleanViewModel, modifier: Modifier = Modifier) {
             item {
                 ShizukuCard(
                     state = ui.shizuku,
+                    report = ui.capabilities,
                     onRequestPermission = vm::requestShizukuPermission,
-                    onOpenShizuku = { openShizukuApp(context) }
+                    onOpenShizuku = { openShizukuApp(context) },
+                    onRecheck = vm::forceRecheckShizuku
                 )
             }
             item {
@@ -73,7 +75,13 @@ fun CleanScreen(vm: CleanViewModel, modifier: Modifier = Modifier) {
             if (!ui.scanning && results.isEmpty()) {
                 item {
                     Text(
-                        "No results yet. Run a scan to see what could be removed, and why.",
+                        if (ui.scanned && ui.notices.isNotEmpty()) {
+                            "Nothing to show. Some checks were skipped or incomplete (see above), so this is not proof that nothing can be cleaned."
+                        } else if (ui.scanned) {
+                            "Nothing found."
+                        } else {
+                            "No results yet. Run a scan to see what could be removed, and why."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.fillMaxWidth().padding(24.dp)

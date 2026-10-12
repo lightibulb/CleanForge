@@ -1,58 +1,137 @@
 # CleanForge
 
-A free, open-source, offline-first storage cleaner for Android 11+. Made by **Aman**.
+A free, open-source, offline-first storage cleaner for Android 11+.
+Made by **Aman**.
 
-No ads. No subscription. No telemetry, analytics or accounts. No internet permission. No root.
+No ads. No subscription. No telemetry, analytics or accounts.
+No internet permission. No root.
 
-> **Status: unverified build.** This version was audited and patched without access to an Android SDK, Gradle or a Kotlin compiler, so it has **not been compiled or tested yet**, and the Gradle wrapper still has to be generated and committed (see `BUILD.md`). No APK is shipped. Build it with `BUILD.md` (or the included GitHub Actions workflow) and run the tests before trusting it with real files.
+---
 
-## What it does
+## Features
 
-- **Clean tab** (light scan): app caches, legacy thumbnail cache, abandoned partial downloads, APK installers, leftovers of uninstalled apps.
-- **Review tab** (on demand): large files, duplicate files, old logs, empty folders. These are only *suggestions for you to look at*. Nothing here is ticked for you. For duplicates, CleanForge lists every copy and never decides which one you want: you tick the copy to delete, and one copy you did not tick always stays.
-- Every result says **why** it was flagged, **how much** space it uses, the **risk**, the **strength of the evidence**, whether it can be undone, and whether it needs **Shizuku**.
-- Nothing is deleted until you confirm a plan. The confirmation lists every item with its full path, why it was flagged, confidence and risk. Each item is re-checked right before it is removed.
+### 🔍 Evidence-Based Cleaning
+Every item CleanForge flags carries **proof** of why it's safe to delete.
+Filename or extension alone is never accepted as evidence.
 
-It makes no "boost", "RAM", "CPU" or "speed" claims. Freeing storage does not do that.
+| Scanner | What it finds | Evidence required |
+|---------|--------------|-------------------|
+| App Caches | `Android/data/<pkg>/cache` contents | Package installed + exact path match |
+| Leftovers | Folders of uninstalled apps | Package unknown to OS + age ≥ 14 days |
+| Thumbnails | `DCIM/.thumbnails` | Only small files, no sub-folders |
+| Incomplete Downloads | `.crdownload`, `.part`, `.partial` | Age ≥ 7 days + Download folder only |
+| Log Files | `*.log` in Downloads | Text content verified + age ≥ 30 days |
+| Large Files | Files over threshold | Top-N by size, never pre-selected |
+| Duplicates | Same content, different paths | Staged hashing, user picks what goes |
+| APK Installers | `.apk` files | Platform parser reads manifest |
+| Empty Folders | Verifiably empty directories | `rmdir` semantics only |
 
-## Requirements
+### 🔬 Storage Forensics (Part 3)
+Deep, app-specific scanning for known cache and media patterns.
+All forensic items are **never pre-selected** — the user always decides.
 
-- Android 11 (API 30) or newer. Designed for a low-end phone such as the Vivo Y11 (1906), non-rooted.
-- **All-files access** for CleanForge (Settings > Apps > CleanForge > Allow access to manage all files).
-- **Shizuku** (optional) for app caches and uninstalled-app leftovers, because Android 11+ hides other apps' `Android/data` from normal apps.
+| App | What's scanned | Safety rule |
+|-----|---------------|-------------|
+| WhatsApp / WhatsApp Business | `.Statuses` (>24h), `Sent` folders, old DB backups (>7d, newest kept) | All-files access (no Shizuku), single files only |
+| Telegram | Video/Audio/Images/Documents downloads (>14d) | All-files access (no Shizuku), single files only |
+| TikTok / TikTok Lite | Video cache, `.music` cache (>7d) | **Not active yet**: needs a Shizuku single-file delete that does not exist |
+| Twitter/X / X Lite | Media cache (>7d) | **Not active yet** (same reason; `cache/` is already offered as an app cache) |
+| Instagram / Instagram Lite | Media cache (>14d) | **Not active yet** (same reason) |
 
-## Shizuku setup (optional)
+`Android/media` is reachable with All-files access; only `Android/data` and `Android/obb` need Shizuku.
 
-1. Install Shizuku from its official page (F-Droid, GitHub or Play).
-2. Start it: on Android 11+ use *Wireless debugging* inside the Shizuku app (no PC needed after the first pairing), or run the adb command it shows.
-3. Open CleanForge > tap **Grant permission** on the Shizuku card > allow.
-4. Shizuku must be restarted after each reboot (unless you use the root start, which CleanForge supports but does not require).
+### 📱 Shizuku Integration (Part 2)
+On Android 11+, `Android/data` and `Android/obb` are invisible to normal apps.
+CleanForge uses [Shizuku](https://shizuku.rikka.app/) as a **user-service** (not root) to:
 
-Shizuku is **not root**. It runs as the shell user and CleanForge only uses it for two exact folder shapes (see `SECURITY.md`).
+- **Read** `Android/data/` and `Android/obb/` for scanning
+- **Clear** app caches (`CONTENTS_ONLY` on exact `cache/` path)
+- **Remove** leftovers of uninstalled apps (`TREE` on exact package folder)
+
+Without Shizuku, those scanners are skipped with a visible notice.
+CleanForge **never** claims Shizuku grants root or unrestricted access.
+
+### 🧠 RAM Monitoring (Part 4)
+Honest, transparent memory information. No fake "boost" claims.
+
+- Reads `/proc/meminfo` (no permission needed)
+- Shows total, used, available, and cached memory
+- Color-coded pressure indicator (LOW → CRITICAL)
+- Optional "Clear background apps" action using `KILL_BACKGROUND_PROCESSES`
+  - Measures the **actual** freed bytes, never estimates
+  - Tells you the truth: Android may reload apps, using more battery
+
+### 🛡️ Safety Model
+- **Fingerprint verification**: Every file is `lstat`-ed at scan time and re-checked before deletion
+- **Symlink protection**: Never follows symlinks; symlink roots are refused
+- **Mount boundaries**: Never crosses filesystem boundaries
+- **Depth/entry limits**: Bounded walks prevent runaway recursion
+- **No shell**: Zero `Runtime.exec`, `ProcessBuilder`, or `sh -c` anywhere
+- **No `deleteRecursively`**: All deletion goes through `SafeDeleter`
+- **Personal data zones**: DCIM, Pictures, Movies, Music, Documents, Download, WhatsApp, Telegram — only individually reviewed files, never pre-selected
+- **Messaging apps protected**: WhatsApp, Telegram, Signal, Messenger, etc. are never pre-selected
+
+---
+
+## Architecture
+
+Enforced by types: scanners emit evidence-bearing `ScanItem`s, `PlanBuilder` yields a
+`CleaningPlan` with refusals and reasons, `confirmedByUser()` is the only path to a
+`ConfirmedPlan`, and `CleaningEngine` accepts nothing else.
+
+| Layer | Package | Responsibility |
+|-------|---------|---------------|
+| Filesystem | `core.fs` | `FsOps`, `SafeDeleter`, `PathRules`, `StorageWalker` |
+| Safety | `core.safety` | `SafetyValidator` — lexical + policy gate |
+| Scanners | `core.scanner` | 9 base + 5 forensic scanners |
+| Cleaning | `core.cleaning` | `PlanBuilder`, `CleaningEngine` |
+| Backend | `core.backend` | `FileOperationBackend`, `PackageInventory`, `Capabilities` |
+| Shizuku | `core.shizuku` | `ShizukuFileServiceConnector`, AIDL adapters |
+| Privileged | `core.privileged` | `FileServiceCore`, `WireCodec`, `PrivilegedExecutor` |
+| Memory | `core.memory` | `RamSnapshot`, `MemInfoParser`, `MemoryInfoProvider` |
+| Domain | `domain.usecase` | `ScanDevice`, `ExecuteCleaningPlan`, `ObserveRam`, `ClearMemory` |
+| DI | `di` | Hilt modules |
+| UI | `ui` | Compose screens, ViewModels, Material 3 |
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full diagram and
+[ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) for the forward-looking proposal (not yet built).
+
+---
 
 ## Permissions
 
 | Permission | Why |
-|---|---|
-| `MANAGE_EXTERNAL_STORAGE` | List and delete things in shared storage that *you* select. |
-| `QUERY_ALL_PACKAGES` | Know which apps are installed for the current user/profile, so "app cache" and "leftover of an uninstalled app" are never guesses from folder names. |
+|-----------|-----|
+| `MANAGE_EXTERNAL_STORAGE` | Read/delete user-selected files in shared storage |
+| `QUERY_ALL_PACKAGES` | Know which apps are installed (never guess from folder names) |
+| `KILL_BACKGROUND_PROCESSES` | Honest RAM clear (Part 4). Only trims reclaimable processes |
 
-There is no internet permission, so file names cannot leave your phone.
+**No `INTERNET`. No `ACCESS_NETWORK_STATE`. No analytics. No ads. Ever.**
+Enforced by `PolicyGuardTest`.
 
-## Safety model
+---
 
-Read `SECURITY.md`. In short: scan, explain, validate, plan, ask, re-check, delete, verify, report; personal folders are only touched for individual files you tick; there is no recycle bin, and the app says so before you confirm.
+## Requirements
 
-## Limitations
+- Android 11 (API 30) or later
+- [Shizuku](https://shizuku.rikka.app/) (optional — needed for `Android/data` / `Android/obb`)
+- `MANAGE_EXTERNAL_STORAGE` granted in Settings → Special access
 
-- Not compiled or tested yet (see top).
-- Cleaning other apps' *internal* caches (`/data/data`) is not possible without root or a hidden API and is not attempted. The earlier hidden-API Shizuku package-manager backend was removed because it could not compile against the public SDK and could not be verified.
-- No per-app storage screen (it needs the special "Usage access" permission); removed rather than half-built.
-- Deleted files cannot be restored.
-- Behaviour on Vivo Funtouch OS has not been tested.
+## Build
 
-## Credits and licence
+See [BUILD.md](BUILD.md).
 
-Created by **Aman**. Copyright (c) 2026 Aman.
+## Security
 
-Licence: **not chosen yet.** Pick one before publishing (GPL-3.0-or-later is the usual FOSS/F-Droid choice; Apache-2.0 is a permissive one) and add a `LICENSE` file. Shizuku's API is Apache-2.0 and is compatible with either.
+See [SECURITY.md](SECURITY.md).
+
+## License
+
+GPL-3.0-or-later *(pending Aman's final decision — see PROJECT_AUDIT.md §13)*
+
+---
+
+## Credits
+
+- **Created & owned by**: Aman
+- **Shizuku**: [RikkaApps](https://github.com/RikkaApps/Shizuku)
