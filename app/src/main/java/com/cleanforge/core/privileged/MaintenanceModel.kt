@@ -21,7 +21,6 @@ enum class ExternalArea(val folder: String) { DATA("data"), OBB("obb") }
 sealed interface MaintenanceRequest {
     val operation: PrivilegedOperation
     val packageName: String
-
     /** What the scan saw. The service refuses to act if the object's identity (device, inode) changed. */
     val expected: FsStat
 
@@ -47,13 +46,29 @@ sealed interface MaintenanceRequest {
     }
 }
 
-/** The path a request acts on, or null if the package identifier is not a valid package name. */
+/** 
+ * The path a request acts on, or null if the package identifier is not a valid package name 
+ * OR if the constructed path violates structural rules.
+ */
 fun MaintenanceRequest.targetPathOrNull(): String? {
+    // 1. Validate Package Name Syntax
     if (!PathRules.isValidPackageName(packageName)) return null
-    return when (this) {
+    
+    // 2. Construct Path
+    val rawPath = when (this) {
         is MaintenanceRequest.ClearExternalAppCache -> "${PathRules.ROOT}/Android/data/$packageName/cache"
         is MaintenanceRequest.RemoveUninstalledAppData -> "${PathRules.ROOT}/Android/${area.folder}/$packageName"
     }
+    
+    // 3. CRITICAL HARDENING: Validate the CONSTRUCTED path immediately
+    // Ensures that even if regex passes, the final string is structurally sound per PathRules
+    try {
+        PathRules.componentsBelowRoot(rawPath)
+    } catch (e: PathException) {
+        return null // Invalid construction
+    }
+    
+    return rawPath
 }
 
 fun MaintenanceRequest.deleteMode(): DeleteMode = when (this) {
@@ -69,43 +84,45 @@ fun MaintenanceRequest.deleteMode(): DeleteMode = when (this) {
 fun ScanItem.toMaintenanceRequest(knownPackages: Set<String>): MaintenanceRequest? {
     val pkg = owningPackage ?: return null
     val fingerprint = fingerprint ?: return null
+    
     val components = try {
         PathRules.componentsBelowRoot(path)
     } catch (e: PathException) {
         return null
     }
+    
     val request: MaintenanceRequest = when (category) {
         CleaningCategory.APP_CACHE -> {
-            if (!PathRules.isExternalAppCacheDir(components) || components[2] != pkg) return null
+            if (!PathRules.isExternalAppCacheDir(components) || !components[2].equals(pkg, ignoreCase = true)) return null
             MaintenanceRequest.ClearExternalAppCache(pkg, fingerprint)
         }
         CleaningCategory.CORPSE_LEFTOVER -> {
-            if (!PathRules.isExternalAppDataRoot(components) || components[2] != pkg) return null
+            if (!PathRules.isExternalAppDataRoot(components) || !components[2].equals(pkg, ignoreCase = true)) return null
             val area = if (components[1].equals("obb", ignoreCase = true)) ExternalArea.OBB else ExternalArea.DATA
             MaintenanceRequest.RemoveUninstalledAppData(area, pkg, fingerprint, knownPackages)
         }
         else -> return null
     }
-    // The executor derives the path itself; it must be exactly the path the user confirmed.
-    return if (request.targetPathOrNull() == path) request else null
+    
+    // ROBUST COMPARISON: Normalize both paths for case-insensitive equality check
+    // Shared storage (FUSE/sdcardfs) is case-insensitive. Strict == fails on minor casing diffs.
+    val targetPath = request.targetPathOrNull() ?: return null
+    if (!targetPath.equals(path, ignoreCase = true)) return null
+    
+    return request
 }
 
 enum class FailureKind {
     /** Nothing was deleted because the target is no longer what the scan saw (gone, replaced, wrong type). */
     PRECONDITION_CHANGED,
-
     /** CleanForge's own policy refused. */
     REFUSED,
-
     /** The privileged channel was unusable at the moment of the attempt. */
     UNAVAILABLE,
-
     /** Stopped at a safety bound before anything was removed. */
     LIMIT,
-
     /** Stopped on request before anything was removed. */
     CANCELLED,
-
     /** The operation ran and failed. */
     IO_ERROR
 }
@@ -116,13 +133,10 @@ enum class FailureKind {
  */
 sealed interface MaintenanceResult {
     val message: String
-
     /** The goal was reached and the target's state was checked afterwards. */
     data class Success(val entriesRemoved: Int, val bytesFreed: Long, override val message: String = "Deleted") : MaintenanceResult
-
     /** Some of the goal was reached. */
     data class Partial(val entriesRemoved: Int, val bytesFreed: Long, override val message: String) : MaintenanceResult
-
     /** The action did not (fully) happen. */
     data class Failure(
         val kind: FailureKind,
@@ -130,10 +144,8 @@ sealed interface MaintenanceResult {
         val entriesRemoved: Int = 0,
         val bytesFreed: Long = 0L
     ) : MaintenanceResult
-
     /** Not attempted: the capability registry says the operation cannot be done in the current state. */
     data class Unsupported(val capability: CapabilityStatus, override val message: String) : MaintenanceResult
-
     /** The action may or may not have happened, or its effect could not be confirmed. */
     data class Unverified(
         override val message: String,
@@ -225,7 +237,6 @@ suspend fun observePostState(
     if (st is FsResult.Unavailable) return PostState.Unknown(st.why)
     if (st is FsResult.Failed) return PostState.Unknown(st.why)
     if (mode != DeleteMode.CONTENTS_ONLY) return PostState.ExistsNonEmpty("the folder is still present")
-
     val l = list(target)
     if (l is FsResult.NotFound) return PostState.Gone
     if (l is FsResult.Denied) return PostState.Unknown(l.why)

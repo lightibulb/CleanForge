@@ -16,36 +16,31 @@ import com.cleanforge.core.fs.WalkLimits
 /**
  * ALL the logic that runs inside the privileged Shizuku process. `ShizukuFileService` is only a thin Binder
  * adapter around this class; keeping the logic here lets the JVM unit tests run the real thing.
- *
  * It trusts nothing from the caller:
- *  - every path must be canonical and below Android/data or Android/obb ([PathRules]);
- *  - every ancestor of the path below the storage root must be a real directory (never a symlink), because lstat
- *    only avoids following the LAST component;
- *  - only two recursive delete shapes exist, and a tree delete is refused unless the app has installed the
- *    installed-apps guard ([setProtectedPackages]) and the package is not in it;
- *  - there is no shell, no command line, no arbitrary-path method.
- *
+ * - every path must be canonical and below Android/data or Android/obb ([PathRules]);
+ * - every ancestor of the path below the storage root must be a real directory (never a symlink), because lstat
+ *   only avoids following the LAST component;
+ * - only two recursive delete shapes exist, and a tree delete is refused unless the app has installed the
+ *   installed-apps guard ([setProtectedPackages]) and the package is not in it;
+ * - there is no shell, no command line, no arbitrary-path method.
  * The installed-apps guard protects against a logic bug in the app, NOT against a hostile app: a hostile app could
  * simply send an empty list. Only the app that Shizuku authorized can reach this service at all.
  */
 class FileServiceCore(
     private val fs: FsOps,
-    /** The app's own package. Its folders are never removed as a "leftover". */
+    /* The app's own package. Its folders are never removed as a "leftover". */
     private val ownPackage: String,
     private val walkLimits: WalkLimits = WalkLimits(),
     private val maxNames: Int = MAX_NAMES,
-    /** Budget for the total length of names in one listing, to stay far below the 1 MB binder transaction limit. */
+    /* Budget for the total length of names in one listing, to stay far below the 1 MB binder transaction limit. */
     private val maxListChars: Int = MAX_LIST_CHARS
 ) {
     private val walker = StorageWalker(fs)
-
     @Volatile private var cancelRequested = false
-
     /** Lower-cased (shared storage is case-insensitive). Null until the app has pushed a list. */
     @Volatile private var protectedLower: Set<String>? = null
 
     // ------------------------------------------------------------------ reads
-
     fun stat(path: String?): StatReply {
         val p = path ?: return StatReply(ReplyStatus.REFUSED)
         val gate = readGate(p)
@@ -62,15 +57,25 @@ class FileServiceCore(
         val p = path ?: return ListReply(ReplyStatus.REFUSED)
         val gate = readGate(p)
         if (gate != ReplyStatus.OK) return ListReply(gate)
+        
+        // 1. Probe to ensure it IS a directory and accessible
         val st = when (val r = fs.probe(p)) {
             is FsProbe.Found -> r.stat
             FsProbe.Missing -> return ListReply(ReplyStatus.NOT_FOUND)
             FsProbe.Denied -> return ListReply(ReplyStatus.OS_DENIED)
             FsProbe.Error -> return ListReply(ReplyStatus.FAILED)
         }
-        if (st.type != FsType.DIRECTORY) return ListReply(ReplyStatus.FAILED)
-        // The folder exists and can be examined but not listed: the OS refused the shell.
-        val names = fs.list(p) ?: return ListReply(ReplyStatus.OS_DENIED)
+        if (st.type != FsType.DIRECTORY) return ListReply(ReplyStatus.FAILED) // Not a dir, but existed
+
+        // 2. Attempt to list
+        val names = fs.list(p)
+        // If fs.list returns null HERE, it means either:
+        // A) Race condition: became inaccessible between probe and list.
+        // B) Implementation limitation: File.list() returned null despite being a dir.
+        // Treat as OS_DENIED or FAILED conservatively.
+        if (names == null) {
+            return ListReply(ReplyStatus.OS_DENIED, detail = "Could not list contents of existing directory")
+        }
 
         val out = ArrayList<String>()
         var chars = 0
@@ -102,7 +107,6 @@ class FileServiceCore(
     }
 
     // ------------------------------------------------------------------ guard + cancel
-
     /**
      * Replaces the installed-apps guard. Invalid names are ignored (they can never match a real package folder).
      * A list that is too long is rejected as a whole and the previous guard stays: truncating a guard would weaken it
@@ -124,18 +128,17 @@ class FileServiceCore(
     }
 
     // ------------------------------------------------------------------ delete
-
     fun delete(path: String?, modeCode: Int, dev: Long, ino: Long, hasIdentity: Boolean): DeleteResult {
         val mode = DeleteMode.fromCode(modeCode)
         if (path == null || mode == null || !hasIdentity) return refused("Malformed delete request")
         if (!PathRules.isServiceDeletable(path, mode)) return refused("Not a folder this service is allowed to delete")
-
+        
         val components = try {
             PathRules.componentsBelowRoot(path)
         } catch (e: PathException) {
             return refused(e.message ?: "Invalid path")
         }
-
+        
         if (mode == DeleteMode.TREE) {
             val guard = protectedLower
                 ?: return refused("The installed-apps guard was not set, so app data will not be deleted")
@@ -143,7 +146,7 @@ class FileServiceCore(
             if (pkg.lowercase() in guard) return refused("$pkg is known to Android, so its folder is not a leftover")
             if (pkg.equals(ownPackage, ignoreCase = true)) return refused("CleanForge never deletes its own folders")
         }
-
+        
         when (ancestorsStatus(path)) {
             ReplyStatus.OK -> Unit
             ReplyStatus.NOT_FOUND -> return DeleteResult(DeleteStatus.MISSING, detail = "A parent folder does not exist")
@@ -151,7 +154,7 @@ class FileServiceCore(
             ReplyStatus.OS_DENIED -> return DeleteResult(DeleteStatus.FAILED, detail = "The OS refused access to a parent folder")
             ReplyStatus.FAILED -> return DeleteResult(DeleteStatus.FAILED, detail = "Could not examine a parent folder")
         }
-
+        
         cancelRequested = false
         // Only directories are ever deleted here, so identity = (type, dev, ino).
         val expected = FsStat(FsType.DIRECTORY, 0L, 0L, dev, ino)
@@ -159,9 +162,8 @@ class FileServiceCore(
     }
 
     // ------------------------------------------------------------------ internals
-
     private fun refused(why: String) = DeleteResult(DeleteStatus.REFUSED, detail = why)
-
+    
     private fun readGate(path: String): ReplyStatus {
         if (!PathRules.isServiceReadable(path)) return ReplyStatus.REFUSED
         return ancestorsStatus(path)

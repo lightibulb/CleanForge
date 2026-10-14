@@ -117,4 +117,24 @@ class PlanBuilderTest {
         assertThat(plan.items[0].category).isEqualTo(CleaningCategory.DUPLICATE)
         assertThat(plan.items[0].keepPath).isEqualTo(b.path)
     }
+
+    @Test fun `a copy inside a folder that is cleaned in the same run is not a keeper`() {
+        val folder = scanItem("$ROOT/DCIM/.thumbnails", CleaningCategory.THUMBNAIL)
+        val outside = copy("$ROOT/Download/a.jpg", ino = 1)
+        val inside = copy("$ROOT/DCIM/.thumbnails/a.jpg", ino = 2)
+        val plan = builder.build(selected = listOf(folder, outside), scanned = listOf(folder, outside, inside))
+        assertThat(plan.items).containsExactly(folder)
+        assertThat(plan.rejected.map { it.item.path }).containsExactly(outside.path)
+        assertThat(plan.rejected[0].reason).contains("at least one must stay")
+    }
+
+    @Test fun `another category cannot delete one copy while the other is wiped with its folder`() {
+        val folder = scanItem("$ROOT/DCIM/.thumbnails", CleaningCategory.THUMBNAIL)
+        val a = copy("$ROOT/Download/a.mp4", ino = 1)
+        val b = copy("$ROOT/DCIM/.thumbnails/a.mp4", ino = 2)
+        val bigA = scanItem(a.path, CleaningCategory.LARGE_FILE, fingerprint = a.fingerprint)
+        val plan = builder.build(selected = listOf(folder, bigA), scanned = listOf(folder, bigA, a, b))
+        assertThat(plan.items).containsExactly(folder)
+        assertThat(plan.rejected.map { it.item.path }).containsExactly(a.path)
+    }
 }

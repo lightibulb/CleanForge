@@ -232,4 +232,35 @@ class SafeDeleterTest {
         assertThat(r.status).isEqualTo(DeleteStatus.IDENTITY_CHANGED)
         assertThat(f.exists()).isTrue()
     }
+
+    // ---------- ancestors (regression: /storage is a tmpfs on a real phone, so every deletion was REFUSED) ----------
+
+    @Test fun `folders above the target may live on another device`() {
+        val target = dir("victim").also { write(File(it, "x.txt")) }
+        val ancestors = generateSequence(target.parentFile) { it.parentFile }.map { it.path }.toSet()
+        val fs = HookedFs().also { it.devOverride = { p -> if (p in ancestors) 777L else null } }
+        val r = deleter(fs).delete(target.path, DeleteMode.TREE, null)
+        assertThat(r.status).isEqualTo(DeleteStatus.OK)
+        assertThat(target.exists()).isFalse()
+    }
+
+    @Test fun `a symlinked parent folder is refused and nothing behind it is touched`() {
+        val victim = dir("real", "cache")
+        write(File(victim, "x.txt"))
+        val link = File(tmp.root, "link")
+        Files.createSymbolicLink(link.toPath(), File(tmp.root, "real").toPath())
+        val r = deleter().delete(File(link, "cache").path, DeleteMode.CONTENTS_ONLY, null)
+        assertThat(r.status).isEqualTo(DeleteStatus.REFUSED)
+        assertThat(File(victim, "x.txt").exists()).isTrue()
+    }
+
+    @Test fun `only folders below the trusted root are inspected`() {
+        val realRoot = dir("realroot")
+        write(File(realRoot, "sub/x.txt"))
+        val linkRoot = File(tmp.root, "linkroot")
+        Files.createSymbolicLink(linkRoot.toPath(), realRoot.toPath())
+        val r = SafeDeleter(NioFsOps, trustedRoot = linkRoot.path).delete(File(linkRoot, "sub").path, DeleteMode.TREE, null)
+        assertThat(r.status).isEqualTo(DeleteStatus.OK)
+        assertThat(File(realRoot, "sub").exists()).isFalse()
+    }
 }

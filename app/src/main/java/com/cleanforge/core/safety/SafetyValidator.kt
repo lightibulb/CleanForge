@@ -44,7 +44,6 @@ class SafetyValidator @Inject constructor() {
             CleaningCategory.FORENSIC_MEDIA -> DeleteMode.FILE
             else -> DeleteMode.FILE
         }
-
         if (item.deleteMode != allowedMode) {
             refuse("Delete mode ${item.deleteMode} is not allowed for ${item.category.label}")
         }
@@ -55,22 +54,18 @@ class SafetyValidator @Inject constructor() {
                 if (!PathRules.isExternalAppCacheDir(c)) refuse("Not an app's external cache folder")
                 if (item.owningPackage != c[2]) refuse("Owning package does not match the folder")
             }
-
             CleaningCategory.CORPSE_LEFTOVER -> {
                 if (!PathRules.isExternalAppDataRoot(c)) refuse("Not an app's external data folder")
                 if (item.owningPackage != c[2]) refuse("Owning package does not match the folder")
             }
-
             CleaningCategory.THUMBNAIL -> {
                 if (!PathRules.isThumbnailDir(c)) refuse("Not the known thumbnail folder")
             }
-
             CleaningCategory.FORENSIC_MEDIA -> {
                 if (!isKnownForensicPath(c)) refuse("Not a known app-specific forensic media path")
                 if (item.owningPackage == null) refuse("Forensic media items must declare their owning package")
                 if (item.owningPackage != c[2]) refuse("Owning package does not match the folder")
             }
-
             else -> Unit
         }
 
@@ -80,7 +75,6 @@ class SafetyValidator @Inject constructor() {
                 (item.category == CleaningCategory.APP_CACHE && PathRules.isExternalAppCacheDir(c)) ||
                 (item.category == CleaningCategory.CORPSE_LEFTOVER && PathRules.isExternalAppDataRoot(c)) ||
                 (item.category == CleaningCategory.FORENSIC_MEDIA && isKnownForensicPath(c))
-
             if (!ok) {
                 refuse("Android/ folders can only be cleaned as an app cache, an uninstalled app's folder, or a known forensic media path")
             }
@@ -90,31 +84,30 @@ class SafetyValidator @Inject constructor() {
         if (c.size < 2) refuse("Refusing to delete a top-level storage folder")
 
         // 5. Personal-data zones: only individually reviewed files, never pre-selected.
-        // Android/media counts as a protected zone in PathRules, but the exact per-package files of the forensic
-        // allowlist live there; they were already validated in step 2 and are single files, never pre-selected.
-        // Every other protected zone (DCIM, Pictures, Download, ...) still refuses forensic items.
-        val allowlistedForensicInAndroidMedia = item.category == CleaningCategory.FORENSIC_MEDIA &&
-            c[0].equals("Android", ignoreCase = true) && c[1].equals("media", ignoreCase = true) &&
-            isKnownForensicPath(c)
-        if (PathRules.isProtectedZone(c) && item.category != CleaningCategory.THUMBNAIL && !allowlistedForensicInAndroidMedia) {
-            if (
-                item.category == CleaningCategory.APP_CACHE ||
-                item.category == CleaningCategory.CORPSE_LEFTOVER ||
-                item.category == CleaningCategory.FORENSIC_MEDIA
-            ) {
-                refuse("Cache/leftover/forensic rules do not apply inside personal folders")
-            }
+        //    Android/media paths for FORENSIC_MEDIA are already validated by step 3.
+        //    This step protects top-level personal folders (DCIM, Pictures, WhatsApp, etc.)
+        if (PathRules.isProtectedZone(c) && item.category != CleaningCategory.THUMBNAIL) {
+            val isAndroidMedia = c.size >= 2 &&
+                c[0].equals("Android", ignoreCase = true) &&
+                c[1].equals("media", ignoreCase = true)
 
+            if (!isAndroidMedia) {
+                if (
+                    item.category == CleaningCategory.APP_CACHE ||
+                    item.category == CleaningCategory.CORPSE_LEFTOVER ||
+                    item.category == CleaningCategory.FORENSIC_MEDIA
+                ) {
+                    refuse("Cache/leftover/forensic rules do not apply inside personal folders")
+                }
+            }
             if (item.isPreselected) refuse("Personal data can never be pre-selected")
         }
     }
 
     /**
      * Very strict allowlist for FORENSIC_MEDIA.
-     *
-     * This does NOT allow arbitrary Android/data or Android/media cleanup. It only allows a single FILE that is a
-     * DIRECT child of one exact app-specific folder (the scanners only ever list one level and propose files).
-     * Matching is case-insensitive because shared storage is.
+     * This does NOT allow arbitrary Android/data or Android/media cleanup.
+     * It only allows the exact app-specific forensic paths produced by the forensic scanners.
      */
     private fun isKnownForensicPath(c: List<String>): Boolean {
         // Need at least: Android / area / package / subfolder / file
@@ -122,26 +115,31 @@ class SafetyValidator @Inject constructor() {
         if (!c[0].equals("Android", ignoreCase = true)) return false
 
         val area = c[1]
-        val pkg = c[2].lowercase()
+        val pkg = c[2] // exact match: the folder name must be the package's real name
         val tail = c.drop(3)
+        val lowerTail = tail.map { it.lowercase() }
 
         // Android/media/<pkg>/...
         if (area.equals("media", ignoreCase = true)) {
             return when (pkg) {
-                "com.whatsapp", "com.whatsapp.w4b" ->
-                    tail.isDirectChildOf("WhatsApp", "Media", ".Statuses") ||
-                        tail.isDirectChildOf("WhatsApp", "Media", "WhatsApp Video", "Sent") ||
-                        tail.isDirectChildOf("WhatsApp", "Media", "WhatsApp Images", "Sent") ||
-                        tail.isDirectChildOf("WhatsApp", "Media", "WhatsApp Animated Gifs", "Sent") ||
-                        (tail.isDirectChildOf("WhatsApp", "Databases") &&
-                            tail.last().startsWith("msgstore-", ignoreCase = true))
-
-                "org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.plus" ->
-                    tail.isDirectChildOf("Telegram", "Telegram Video") ||
-                        tail.isDirectChildOf("Telegram", "Telegram Audio") ||
-                        tail.isDirectChildOf("Telegram", "Telegram Images") ||
-                        tail.isDirectChildOf("Telegram", "Telegram Documents")
-
+                "com.whatsapp", "com.whatsapp.w4b" -> {
+                    lowerTail.hasPrefix("whatsapp", "media", ".statuses") ||
+                    lowerTail.hasPrefix("whatsapp", "media", "whatsapp video", "sent") ||
+                    lowerTail.hasPrefix("whatsapp", "media", "whatsapp images", "sent") ||
+                    lowerTail.hasPrefix("whatsapp", "media", "whatsapp animated gifs", "sent") ||
+                    (
+                        lowerTail.hasPrefix("whatsapp", "databases") &&
+                        tail.last().lowercase().startsWith("msgstore-")
+                    )
+                }
+                "org.telegram.messenger",
+                "org.telegram.messenger.web",
+                "org.telegram.plus" -> {
+                    lowerTail.hasPrefix("telegram", "telegram video") ||
+                    lowerTail.hasPrefix("telegram", "telegram audio") ||
+                    lowerTail.hasPrefix("telegram", "telegram images") ||
+                    lowerTail.hasPrefix("telegram", "telegram documents")
+                }
                 else -> false
             }
         }
@@ -149,13 +147,19 @@ class SafetyValidator @Inject constructor() {
         // Android/data/<pkg>/...
         if (area.equals("data", ignoreCase = true)) {
             return when (pkg) {
-                "com.zhiliaoapp.musically", "com.zhiliaoapp.musically.go" ->
-                    tail.isDirectChildOf("cache") || tail.isDirectChildOf("files", ".music")
-
-                "com.twitter.android", "com.twitter.android.lite",
-                "com.instagram.android", "com.instagram.lite" ->
-                    tail.isDirectChildOf("cache")
-
+                "com.zhiliaoapp.musically",
+                "com.zhiliaoapp.musically.go" -> {
+                    lowerTail.hasPrefix("cache") ||
+                    lowerTail.hasPrefix("files", ".music")
+                }
+                "com.twitter.android",
+                "com.twitter.android.lite" -> {
+                    lowerTail.hasPrefix("cache")
+                }
+                "com.instagram.android",
+                "com.instagram.lite" -> {
+                    lowerTail.hasPrefix("cache")
+                }
                 else -> false
             }
         }
@@ -164,11 +168,17 @@ class SafetyValidator @Inject constructor() {
     }
 
     /**
-     * True only for `dir... / oneEntry`: the folder path matches [dir] exactly (case-insensitive) and exactly one
-     * component follows. The folder itself and anything nested deeper are refused.
+     * The list must contain the full prefix AND at least one extra component after it.
+     * Example:
+     *   [telegram, telegram video, file.mp4] hasPrefix("telegram", "telegram video") = true
+     *   [telegram, telegram video] hasPrefix("telegram", "telegram video") = false
      */
-    private fun List<String>.isDirectChildOf(vararg dir: String): Boolean =
-        size == dir.size + 1 && dir.indices.all { this[it].equals(dir[it], ignoreCase = true) }
+    private fun List<String>.hasPrefix(vararg prefix: String): Boolean {
+        if (size <= prefix.size) return false
+        return prefix.indices.all { index ->
+            this[index].equals(prefix[index], ignoreCase = true)
+        }
+    }
 
     private fun refuse(message: String): Nothing = throw UnsafeDeletionException(message)
 }

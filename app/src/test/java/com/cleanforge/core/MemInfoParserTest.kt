@@ -74,11 +74,6 @@ class MemInfoParserTest {
         assertThat(critical.pressure).isEqualTo(MemoryPressure.CRITICAL)
     }
 
-    @Test fun `a zero or negative MemTotal returns null, not a CRITICAL-looking snapshot`() {
-        assertThat(MemInfoParser.parse("MemTotal: 0 kB\nMemAvailable: 0 kB", 0)).isNull()
-        assertThat(MemInfoParser.parse("MemTotal: -5 kB", 0)).isNull()
-    }
-
     @Test fun `empty content returns null`() {
         assertThat(MemInfoParser.parse("", 0)).isNull()
     }

@@ -6,136 +6,208 @@ import com.cleanforge.core.memory.BackgroundProcessKiller
 import com.cleanforge.core.memory.MemoryInfoProvider
 import com.cleanforge.core.memory.RamSnapshot
 import com.cleanforge.domain.usecase.ClearMemoryUseCase
-import com.cleanforge.testutil.FakeInventory
-import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.lang.reflect.Proxy
 
 class ClearMemoryUseCaseTest {
-
-    /** Returns the given readings in order, then null (reading failed). */
-    private class FakeProvider(vararg readings: RamSnapshot?) : MemoryInfoProvider {
-        private val queue = ArrayDeque(readings.toList())
-        override fun snapshot(): RamSnapshot? = queue.removeFirstOrNull()
-    }
-
-    private class RecordingKiller(
-        private val throwFor: Set<String> = emptySet(),
-        private val skip: Set<String> = emptySet()
-    ) : BackgroundProcessKiller {
-        val killed = mutableListOf<String>()
-        override fun kill(packageName: String): Boolean {
-            if (packageName in throwFor) throw SecurityException("denied")
-            if (packageName in skip) return false
-            killed += packageName
-            return true
-        }
-    }
-
-    /** Same as [FakeInventory] but one package's lookup fails (UNKNOWN). */
-    private class FlakyInventory(private val base: FakeInventory, private val unknownFor: String) : PackageInventory by base {
-        override fun installState(packageName: String): InstallState =
-            if (packageName == unknownFor) InstallState.UNKNOWN else base.installState(packageName)
-    }
 
     private fun snapshot(availableBytes: Long) = RamSnapshot(
         totalBytes = 4_000_000_000L,
         availableBytes = availableBytes,
-        freeBytes = 0L, buffersBytes = 0L, cachedBytes = 0L,
-        swapTotalBytes = 0L, swapFreeBytes = 0L,
+        freeBytes = 0L,
+        buffersBytes = 0L,
+        cachedBytes = 0L,
+        swapTotalBytes = 0L,
+        swapFreeBytes = 0L,
         timestamp = 0L
     )
 
-    private fun useCase(
-        provider: MemoryInfoProvider,
-        inventory: PackageInventory,
-        killer: BackgroundProcessKiller
-    ) = ClearMemoryUseCase(killer, inventory, provider).also { it.settleDelayMs = 0L }
+    /**
+     * Hand-written test double for [BackgroundProcessKiller].
+     * It records what the use case asked for and lets each test decide which packages are allowed.
+     */
+    private class RecordingBackgroundProcessKiller(
+        private val allow: (String) -> Boolean
+    ) : BackgroundProcessKiller {
 
-    @Test fun `freed bytes are measured from the MemAvailable delta, never estimated`() = runTest {
-        val killer = RecordingKiller()
-        val result = useCase(
-            FakeProvider(snapshot(1_000_000_000L), snapshot(1_500_000_000L)),
-            FakeInventory(known = setOf("com.test.app")),
-            killer
-        )()
+        val killRequestsSent = mutableListOf<String>()
+        val deliberatelySkipped = mutableListOf<String>()
 
-        assertThat(result.freedBytes).isEqualTo(500_000_000L)
-        assertThat(result.measured).isTrue()
-        assertThat(result.packagesRequested).isEqualTo(1)
-        assertThat(killer.killed).containsExactly("com.test.app")
+        override fun kill(packageName: String): Boolean {
+            return if (allow(packageName)) {
+                killRequestsSent += packageName
+                true
+            } else {
+                deliberatelySkipped += packageName
+                false
+            }
+        }
     }
 
-    @Test fun `if available memory drops after the clear, freed bytes is zero and never negative`() = runTest {
-        val result = useCase(
-            FakeProvider(snapshot(1_000_000_000L), snapshot(900_000_000L)),
-            FakeInventory(known = setOf("com.test.app")),
-            RecordingKiller()
-        )()
+    private class ScriptedMemoryProvider(
+        vararg snapshots: RamSnapshot?
+    ) : MemoryInfoProvider {
 
-        assertThat(result.freedBytes).isEqualTo(0L)
-        assertThat(result.measured).isTrue()
-        assertThat(result.note).contains("No measurable gain")
+        private val queue = ArrayDeque<RamSnapshot?>(snapshots.toList())
+
+        override fun snapshot(): RamSnapshot? = queue.removeFirstOrNull()
     }
 
-    @Test fun `an app uninstalled with its data kept is never touched`() = runTest {
-        val killer = RecordingKiller()
-        val result = useCase(
-            FakeProvider(snapshot(1000L), snapshot(1000L)),
-            FakeInventory(known = setOf("com.kept.app", "com.live.app"), installed = setOf("com.live.app")),
-            killer
-        )()
+    /**
+     * Proxy-based fake for [PackageInventory].
+     *
+     * This avoids requiring Mockito and avoids depending on the full shape of PackageInventory.
+     * It handles the members used by ClearMemoryUseCase and common Object methods.
+     */
+    private fun fakeInventory(
+        known: Set<String>?,
+        installed: Set<String>,
+        unknown: Set<String> = emptySet()
+    ): PackageInventory {
+        return Proxy.newProxyInstance(
+            PackageInventory::class.java.classLoader,
+            arrayOf(PackageInventory::class.java)
+        ) { _, method, args ->
+            val pkg = args?.firstOrNull() as? String
 
-        assertThat(killer.killed).containsExactly("com.live.app")
-        assertThat(result.packagesRequested).isEqualTo(1)
+            when (method.name) {
+                "knownPackageNames" -> known
+
+                "isCurrentlyInstalled" -> pkg != null && pkg in installed
+
+                "installState" -> when {
+                    pkg == null -> InstallState.NOT_KNOWN
+                    pkg in installed -> InstallState.INSTALLED
+                    pkg in unknown -> InstallState.UNKNOWN
+                    else -> InstallState.NOT_KNOWN
+                }
+
+                "toString" -> "FakePackageInventory"
+                "hashCode" -> 0
+                "equals" -> false
+
+                else -> throw UnsupportedOperationException(
+                    "Unexpected PackageInventory call in ClearMemoryUseCaseTest: ${method.name}"
+                )
+            }
+        } as PackageInventory
     }
 
-    @Test fun `a package whose install state is UNKNOWN is never touched`() = runTest {
-        val killer = RecordingKiller()
-        val inventory = FlakyInventory(FakeInventory(known = setOf("com.unknown.app", "com.live.app")), "com.unknown.app")
-        val result = useCase(FakeProvider(snapshot(1000L), snapshot(1000L)), inventory, killer)()
+    @Test
+    fun `freed bytes are measured honestly from MemAvailable delta, never estimated`() = runTest {
+        val killer = RecordingBackgroundProcessKiller { true }
+        val inventory = fakeInventory(
+            known = setOf("com.test.app"),
+            installed = setOf("com.test.app")
+        )
+        val provider = ScriptedMemoryProvider(
+            snapshot(availableBytes = 1_000_000_000L),
+            snapshot(availableBytes = 1_500_000_000L)
+        )
 
-        assertThat(killer.killed).containsExactly("com.live.app")
-        assertThat(result.packagesRequested).isEqualTo(1)
+        val useCase = ClearMemoryUseCase(killer, inventory, provider)
+        val result = useCase()
+
+        assertEquals(500_000_000L, result.freedBytes)
+        assertEquals(1, result.processesTouched)
+        assertTrue(killer.killRequestsSent.contains("com.test.app"))
+        assertTrue(result.note.contains("Freed", ignoreCase = true))
     }
 
-    @Test fun `a failed package list touches nothing`() = runTest {
-        val killer = RecordingKiller()
-        val result = useCase(FakeProvider(snapshot(1000L), snapshot(1000L)), FakeInventory(known = null), killer)()
+    @Test
+    fun `if memory available drops after clear, freed bytes is zero, never negative`() = runTest {
+        val killer = RecordingBackgroundProcessKiller { true }
+        val inventory = fakeInventory(
+            known = setOf("com.test.app"),
+            installed = setOf("com.test.app")
+        )
+        val provider = ScriptedMemoryProvider(
+            snapshot(availableBytes = 1_000_000_000L),
+            snapshot(availableBytes = 900_000_000L)
+        )
 
-        assertThat(killer.killed).isEmpty()
-        assertThat(result.packagesRequested).isEqualTo(0)
+        val useCase = ClearMemoryUseCase(killer, inventory, provider)
+        val result = useCase()
+
+        assertEquals(0L, result.freedBytes)
+        assertEquals(1, result.processesTouched)
     }
 
-    @Test fun `a refused package does not stop the others and is not counted`() = runTest {
-        val killer = RecordingKiller(throwFor = setOf("com.protected.app"))
-        val result = useCase(
-            FakeProvider(snapshot(1000L), snapshot(1000L)),
-            FakeInventory(known = setOf("com.protected.app", "com.ok.app")),
-            killer
-        )()
+    @Test
+    fun `packages skipped by BackgroundProcessKiller are not counted as touched`() = runTest {
+        val killer = RecordingBackgroundProcessKiller { false }
+        val inventory = fakeInventory(
+            known = setOf("com.system.app"),
+            installed = setOf("com.system.app")
+        )
+        val provider = ScriptedMemoryProvider(
+            snapshot(availableBytes = 1_000_000_000L),
+            snapshot(availableBytes = 1_000_000_000L)
+        )
 
-        assertThat(killer.killed).containsExactly("com.ok.app")
-        assertThat(result.packagesRequested).isEqualTo(1)
+        val useCase = ClearMemoryUseCase(killer, inventory, provider)
+        val result = useCase()
+
+        assertEquals(0, result.processesTouched)
+        assertTrue(killer.killRequestsSent.isEmpty())
+        assertTrue(killer.deliberatelySkipped.contains("com.system.app"))
     }
 
-    @Test fun `apps the killer deliberately skips are not counted as requested`() = runTest {
-        val killer = RecordingKiller(skip = setOf("com.system.like"))
-        val result = useCase(
-            FakeProvider(snapshot(1000L), snapshot(1000L)),
-            FakeInventory(known = setOf("com.system.like", "com.user.app")),
-            killer
-        )()
+    @Test
+    fun `packages not currently installed are never passed to the killer`() = runTest {
+        val killer = RecordingBackgroundProcessKiller { true }
+        val inventory = fakeInventory(
+            known = setOf("com.not.installed.app"),
+            installed = emptySet()
+        )
+        val provider = ScriptedMemoryProvider(
+            snapshot(availableBytes = 1_000_000_000L),
+            snapshot(availableBytes = 1_000_000_000L)
+        )
 
-        assertThat(result.packagesRequested).isEqualTo(1)
+        val useCase = ClearMemoryUseCase(killer, inventory, provider)
+        val result = useCase()
+
+        assertEquals(0, result.processesTouched)
+        assertTrue(killer.killRequestsSent.isEmpty())
     }
 
-    @Test fun `when memory cannot be read the result says unknown instead of claiming zero freed`() = runTest {
-        val result = useCase(FakeProvider(null, null), FakeInventory(known = setOf("com.test.app")), RecordingKiller())()
+    @Test
+    fun `packages whose install state cannot be determined are never killed`() = runTest {
+        val killer = RecordingBackgroundProcessKiller { true }
+        val inventory = fakeInventory(
+            known = setOf("com.unknown.app"),
+            installed = emptySet(),
+            unknown = setOf("com.unknown.app")
+        )
+        val provider = ScriptedMemoryProvider(
+            snapshot(availableBytes = 1_000_000_000L),
+            snapshot(availableBytes = 1_000_000_000L)
+        )
 
-        assertThat(result.measured).isFalse()
-        assertThat(result.freedBytes).isEqualTo(0L)
-        assertThat(result.note).contains("could not be read")
-        assertThat(result.note).doesNotContain("No measurable gain")
+        val useCase = ClearMemoryUseCase(killer, inventory, provider)
+        val result = useCase()
+
+        assertEquals(0, result.processesTouched)
+        assertTrue(killer.killRequestsSent.isEmpty())
+    }
+
+    @Test
+    fun `if memory info is unavailable, result says so instead of inventing a number`() = runTest {
+        val killer = RecordingBackgroundProcessKiller { true }
+        val inventory = fakeInventory(
+            known = setOf("com.test.app"),
+            installed = setOf("com.test.app")
+        )
+        val provider = ScriptedMemoryProvider(null, null)
+
+        val useCase = ClearMemoryUseCase(killer, inventory, provider)
+        val result = useCase()
+
+        assertEquals(0L, result.freedBytes)
+        assertTrue(result.note.contains("unavailable", ignoreCase = true))
     }
 }

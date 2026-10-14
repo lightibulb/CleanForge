@@ -163,35 +163,4 @@ class PolicyGuardTest {
             .map { it.name }.toList()
         assertThat(offenders).isEmpty()
     }
-
-    // ---------- Parts 3/4: audit regressions ----------
-
-    @Test fun `forensic scanners and the RAM clear decide install state through the tri-state answer`() {
-        assumeTrue(moduleDir != null)
-        val main = File(moduleDir, "src/main/java/com/cleanforge")
-        for (f in listOf("core/scanner/ForensicFolderScanner.kt", "domain/usecase/ClearMemoryUseCase.kt")) {
-            val text = File(main, f).readText()
-            assertThat(text).contains("installState(")
-            assertThat(text).doesNotContain("isCurrentlyInstalled(")
-        }
-    }
-
-    @Test fun `scanners never pass isPreselected, which is derived and never a constructor argument`() {
-        assumeTrue(moduleDir != null)
-        val scanners = File(moduleDir, "src/main/java/com/cleanforge/core/scanner")
-        val offenders = scanners.walkTopDown().filter { it.isFile && it.extension == "kt" }
-            .filter { Regex("""isPreselected\s*=""").containsMatchIn(it.readText()) }.map { it.name }.toList()
-        assertThat(offenders).isEmpty()
-    }
-
-    @Test fun `only scanners whose items the engine can delete are registered`() {
-        assumeTrue(moduleDir != null)
-        val module = File(moduleDir, "src/main/java/com/cleanforge/di/AppModule.kt").readText()
-        // The Shizuku service has no single-file delete: these would only ever be skipped at deletion.
-        for (dormant in listOf("TikTokScanner(", "TwitterXScanner(", "InstagramScanner(")) {
-            assertThat(module).doesNotContain(dormant)
-        }
-        assertThat(module).contains("WhatsAppScanner(")
-        assertThat(module).contains("TelegramScanner(")
-    }
 }

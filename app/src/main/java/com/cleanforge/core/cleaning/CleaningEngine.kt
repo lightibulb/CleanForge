@@ -71,7 +71,14 @@ class CleaningEngine(
         for ((index, item) in items.withIndex()) {
             currentCoroutineContext().ensureActive()
             emit(CleaningProgress.ItemStarted(index + 1, items.size, item))
-            val outcome = processItem(item)
+            val outcome = try {
+                processItem(item)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                // A failing capability/inventory call must cost ONE item, not the whole run and its report.
+                failed(item, t.message ?: "Cleanup failed unexpectedly")
+            }
             outcomes += outcome
             freed += outcome.bytesFreed
             emit(CleaningProgress.Progress(index + 1, items.size, freed, item.displayName, outcome))

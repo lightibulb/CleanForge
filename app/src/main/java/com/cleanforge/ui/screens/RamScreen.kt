@@ -15,6 +15,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,24 +24,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cleanforge.core.memory.MemoryPressure
 import com.cleanforge.core.memory.RamSnapshot
 import com.cleanforge.ui.RamViewModel
-import com.cleanforge.ui.formatBytes
 
 @Composable
 fun RamScreen(
     viewModel: RamViewModel = hiltViewModel()
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsState()
 
-    // Poll only while the screen is actually visible: composition alone survives the app going to the background.
-    LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.startObserving() }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stopObserving() }
-    DisposableEffect(Unit) { onDispose { viewModel.stopObserving() } }
+    // Observe only while this screen is composed.
+    DisposableEffect(Unit) {
+        viewModel.startObserving()
+        onDispose { viewModel.stopObserving() }
+    }
 
     val snapshot = state.snapshot
 
@@ -48,15 +46,10 @@ fun RamScreen(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Unknown is shown as unknown, never a fake zero, and a failed read is not "still loading".
+        // Unknown is shown as unknown, never a fake zero.
         if (snapshot == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (state.readFailed) "Memory information could not be read on this device."
-                    else "Reading memory info…",
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center
-                )
+                Text("Reading memory info…", style = MaterialTheme.typography.bodyLarge)
             }
             return@Column
         }
@@ -137,4 +130,10 @@ private fun pressureColor(pressure: MemoryPressure): Color = when (pressure) {
     MemoryPressure.NORMAL -> Color(0xFF1976D2)
     MemoryPressure.HIGH -> Color(0xFFEF6C00)
     MemoryPressure.CRITICAL -> Color(0xFFC62828)
+}
+
+private fun formatBytes(bytes: Long): String {
+    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+    return if (gb >= 1.0) String.format("%.1f GB", gb)
+    else String.format("%.0f MB", bytes / (1024.0 * 1024.0))
 }

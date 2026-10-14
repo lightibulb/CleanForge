@@ -17,8 +17,6 @@ import javax.inject.Inject
 
 data class RamUiState(
     val snapshot: RamSnapshot? = null,
-    /** The last reading failed: memory is "unknown", not "still loading". */
-    val readFailed: Boolean = false,
     val isClearing: Boolean = false,
     val lastClearResult: ClearMemoryResult? = null
 )
@@ -39,7 +37,7 @@ class RamViewModel @Inject constructor(
         if (observeJob?.isActive == true) return
         observeJob = viewModelScope.launch {
             observeRam(intervalMs).collect { snap ->
-                _state.update { it.copy(snapshot = snap, readFailed = snap == null) }
+                _state.update { it.copy(snapshot = snap) }
             }
         }
     }
@@ -54,13 +52,8 @@ class RamViewModel @Inject constructor(
         if (_state.value.isClearing) return
         viewModelScope.launch {
             _state.update { it.copy(isClearing = true, lastClearResult = null) }
-            try {
-                val result = clearMemory()   // runs on IO inside the use case
-                _state.update { it.copy(lastClearResult = result) }
-            } finally {
-                // Also on cancellation or failure: the button must never stay disabled forever.
-                _state.update { it.copy(isClearing = false) }
-            }
+            val result = clearMemory()   // runs on IO inside the use case
+            _state.update { it.copy(isClearing = false, lastClearResult = result) }
         }
     }
 }

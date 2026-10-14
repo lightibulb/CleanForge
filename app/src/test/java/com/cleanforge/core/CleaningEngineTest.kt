@@ -388,4 +388,23 @@ class CleaningEngineTest {
         assertThat(progress.last().freedBytes).isEqualTo(30L)
         assertThat((events[1] as CleaningProgress.ItemStarted).item.path).isEqualTo(a.path)
     }
+
+    @Test fun `an unexpected exception costs one item, not the whole run and its report`() = runTest {
+        val p1 = "$ROOT/Download/a.bin"
+        val p2 = "$ROOT/Download/b.bin"
+        fs.file(p1, size = 10)
+        fs.file(p2, size = 10)
+        val flaky = object : com.cleanforge.core.backend.Capabilities {
+            var calls = 0
+            override fun hasAllFilesAccess(): Boolean {
+                if (calls++ == 0) throw IllegalStateException("binder died")
+                return true
+            }
+            override fun shizukuAuthorized() = true
+        }
+        val r = cleanWith(engine(capabilities = flaky), scanned(scanItem(p1)), scanned(scanItem(p2)))
+        assertThat(r.outcomes.map { it.status }).containsExactly(ItemStatus.FAILED, ItemStatus.DELETED).inOrder()
+        assertThat(fs.exists(p1)).isTrue()
+        assertThat(fs.exists(p2)).isFalse()
+    }
 }

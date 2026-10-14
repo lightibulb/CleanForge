@@ -1,0 +1,211 @@
+.
+├── AUDIT_RESPONSE.md
+├── BUILD.md
+├── CHANGELOG.md
+├── PROJECT_AUDIT.md
+├── README.md
+├── SECURITY.md
+├── app
+│   ├── build.gradle.kts
+│   ├── proguard-rules.pro
+│   └── src
+│       ├── main
+│       │   ├── AndroidManifest.xml
+│       │   ├── aidl
+│       │   │   └── com
+│       │   │       └── cleanforge
+│       │   │           └── shizuku
+│       │   │               └── IFileService.aidl
+│       │   ├── java
+│       │   │   └── com
+│       │   │       └── cleanforge
+│       │   │           ├── CleanForgeApp.kt
+│       │   │           ├── MainActivity.kt
+│       │   │           ├── core
+│       │   │           │   ├── backend
+│       │   │           │   │   ├── Capabilities.kt
+│       │   │           │   │   ├── FileOperationBackend.kt
+│       │   │           │   │   ├── FsResult.kt
+│       │   │           │   │   ├── PackageInventory.kt
+│       │   │           │   │   ├── ShizukuFileBackend.kt
+│       │   │           │   │   └── StandardFileBackend.kt
+│       │   │           │   ├── cleaning
+│       │   │           │   │   ├── CleaningEngine.kt
+│       │   │           │   │   └── PlanBuilder.kt
+│       │   │           │   ├── fs
+│       │   │           │   │   ├── AndroidFsOps.kt
+│       │   │           │   │   ├── FsOps.kt
+│       │   │           │   │   ├── PathRules.kt
+│       │   │           │   │   ├── SafeDeleter.kt
+│       │   │           │   │   └── StorageWalker.kt
+│       │   │           │   ├── memory
+│       │   │           │   │   ├── BackgroundProcessKiller.kt
+│       │   │           │   │   ├── ClearMemoryResult.kt
+│       │   │           │   │   ├── MemInfoParser.kt
+│       │   │           │   │   ├── MemInfoProvider.kt
+│       │   │           │   │   └── RamSnapshot.kt
+│       │   │           │   ├── model
+│       │   │           │   │   ├── CleaningPlan.kt
+│       │   │           │   │   ├── Enums.kt
+│       │   │           │   │   └── ScanItem.kt
+│       │   │           │   ├── privileged
+│       │   │           │   │   ├── BlockingCall.kt
+│       │   │           │   │   ├── CapabilityModel.kt
+│       │   │           │   │   ├── CapabilityRegistry.kt
+│       │   │           │   │   ├── FileServiceCore.kt
+│       │   │           │   │   ├── MaintenanceModel.kt
+│       │   │           │   │   ├── PrivilegedExecutor.kt
+│       │   │           │   │   ├── PrivilegedFileApi.kt
+│       │   │           │   │   ├── PrivilegedOperation.kt
+│       │   │           │   │   ├── PrivilegedSessionProvider.kt
+│       │   │           │   │   └── WireCodec.kt
+│       │   │           │   ├── safety
+│       │   │           │   │   └── SafetyValidator.kt
+│       │   │           │   ├── scanner
+│       │   │           │   │   ├── ApkScanner.kt
+│       │   │           │   │   ├── CacheScanner.kt
+│       │   │           │   │   ├── CorpseScanner.kt
+│       │   │           │   │   ├── DuplicateScanner.kt
+│       │   │           │   │   ├── EmptyDirectoryScanner.kt
+│       │   │           │   │   ├── ForensicFolderScanner.kt
+│       │   │           │   │   ├── InstagramScanner.kt
+│       │   │           │   │   ├── LargeFileScanner.kt
+│       │   │           │   │   ├── LogScanner.kt
+│       │   │           │   │   ├── Scanner.kt
+│       │   │           │   │   ├── TelegramScanner.kt
+│       │   │           │   │   ├── TempScanner.kt
+│       │   │           │   │   ├── ThumbnailScanner.kt
+│       │   │           │   │   ├── TikTokScanner.kt
+│       │   │           │   │   ├── TwitterXScanner.kt
+│       │   │           │   │   └── WhatsAppScanner.kt
+│       │   │           │   └── shizuku
+│       │   │           │       ├── AidlPrivilegedFileApi.kt
+│       │   │           │       ├── ShizukuFileService.kt
+│       │   │           │       ├── ShizukuFileServiceConnector.kt
+│       │   │           │       ├── ShizukuManager.kt
+│       │   │           │       ├── ShizukuState.kt
+│       │   │           │       └── ShizukuStateSource.kt
+│       │   │           ├── data
+│       │   │           │   ├── Preferences.kt
+│       │   │           │   ├── ScanModels.kt
+│       │   │           │   ├── Verses.kt
+│       │   │           │   └── repository
+│       │   │           │       └── ScanRepository.kt
+│       │   │           ├── di
+│       │   │           │   └── AppModule.kt
+│       │   │           ├── domain
+│       │   │           │   └── usecase
+│       │   │           │       ├── ClearMemoryUseCase.kt
+│       │   │           │       ├── ExecuteCleaningPlanUseCase.kt
+│       │   │           │       ├── ObserveRamUseCase.kt
+│       │   │           │       └── ScanDeviceUseCase.kt
+│       │   │           └── ui
+│       │   │               ├── CleanForgeApp.kt
+│       │   │               ├── CleanForgeNavHost.kt
+│       │   │               ├── CleanViewModel.kt
+│       │   │               ├── ConfirmationEvidence.kt
+│       │   │               ├── Format.kt
+│       │   │               ├── RamViewModel.kt
+│       │   │               ├── components
+│       │   │               │   ├── CounterHeading.kt
+│       │   │               │   ├── Dialogs.kt
+│       │   │               │   ├── HeroRing.kt
+│       │   │               │   ├── ItemComponents.kt
+│       │   │               │   ├── RamGuage.kt
+│       │   │               │   ├── StatusCards.kt
+│       │   │               │   ├── VerseHero.kt
+│       │   │               │   ├── WarmButton.kt
+│       │   │               │   ├── WarmCard.kt
+│       │   │               │   ├── WarmCheck.kt
+│       │   │               │   ├── WarmDock.kt
+│       │   │               │   ├── WarmFab.kt
+│       │   │               │   ├── WarmSheet.kt
+│       │   │               │   ├── WarmSwitch.kt
+│       │   │               │   └── WarmToast.kt
+│       │   │               ├── screens
+│       │   │               │   ├── AboutScreen.kt
+│       │   │               │   ├── CleanScreen.kt
+│       │   │               │   ├── ItemRow.kt
+│       │   │               │   ├── MemoryScreen.kt
+│       │   │               │   ├── RamScreen.kt
+│       │   │               │   ├── ReviewScreen.kt
+│       │   │               │   └── Sheets.kt
+│       │   │               ├── theme
+│       │   │               │   ├── Color.kt
+│       │   │               │   ├── Theme.kt
+│       │   │               │   ├── Type.kt
+│       │   │               │   └── WarmPalette.kt
+│       │   │               └── util
+│       │   │                   └── Haptics.kt
+│       │   └── res
+│       │       ├── drawable
+│       │       │   └── ic_launcher_foreground.xml
+│       │       ├── font
+│       │       │   ├── fraunces.ttf
+│       │       │   ├── fraunces_Italic.ttf
+│       │       │   └── inter.ttf
+│       │       ├── mipmap-anydpi
+│       │       │   └── ic_launcher.xml
+│       │       ├── values
+│       │       │   ├── ic_launcher_background.xml
+│       │       │   ├── strings.xml
+│       │       │   └── themes.xml
+│       │       └── values-night
+│       │           └── themes.xml
+│       └── test
+│           └── java
+│               └── com
+│                   └── cleanforge
+│                       ├── core
+│                       │   ├── CapabilityRegistryTest.kt
+│                       │   ├── CleaningEngineTest.kt
+│                       │   ├── ClearMemoryUseCaseTest.kt
+│                       │   ├── FileServiceCoreTest.kt
+│                       │   ├── ForensicScannersTest.kt
+│                       │   ├── ForensicValidatorTest.kt
+│                       │   ├── MaintenanceModelTest.kt
+│                       │   ├── MemInfoParserTest.kt
+│                       │   ├── PlanBuilderTest.kt
+│                       │   ├── PolicyGuardTest.kt
+│                       │   ├── PrivilegedExecutorTest.kt
+│                       │   ├── SafeDeleterTest.kt
+│                       │   ├── SafetyValidatorTest.kt
+│                       │   ├── ScanRepositoryTest.kt
+│                       │   ├── ScannerEvidenceTest.kt
+│                       │   └── WireCodecTest.kt
+│                       ├── testutil
+│                       │   ├── Fixtures.kt
+│                       │   └── PrivilegedFakes.kt
+│                       └── ui
+│                           └── ConfirmationEvidenceTest.kt
+├── build.gradle.kts
+├── demowebapp
+│   ├── CFwebApp.html
+│   ├── CleanForge.html
+│   └── CleanForgeNew.html
+├── docs
+│   ├── ARCHITECTURE_PLAN.md
+│   ├── CAPABILITY_AUDIT.md
+│   ├── IMPLEMENTATION_ROADMAP.md
+│   ├── PART2_HANDOFF.md
+│   ├── PART3_BUG_AUDIT.md
+│   ├── PART5_AUDIT_UPDATE.md
+│   ├── PART_3.md
+│   ├── SHIZUKU_CAPABILITY_MATRIX.md
+│   ├── SHIZUKU_SETUP_AND_COMPATIBILITY.md
+│   ├── SecAudRprt13Oct.md
+│   └── cleanforge-part2.patch
+├── gradle
+│   ├── libs.versions.toml
+│   └── wrapper
+│       ├── gradle-wrapper.jar
+│       ├── gradle-wrapper.properties
+│       ├── gradlew
+│       └── gradlew.bat
+├── gradle.properties
+├── gradlew
+├── gradlew.bat
+├── settings.gradle.kts
+└── tree.txt
+
+48 directories, 161 files

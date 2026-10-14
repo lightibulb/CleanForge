@@ -11,16 +11,13 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import javax.inject.Inject
 
-/**
- * Emits a RAM reading every [intervalMs] while collected; stops on cancellation. A reading that could not be taken
- * is emitted as null ("unknown"), never skipped, so the UI can say so instead of waiting forever.
- */
+/** Emits live RAM snapshots every [intervalMs] while collected; stops on cancellation. */
 class ObserveRamUseCase @Inject constructor(
     private val provider: MemoryInfoProvider
 ) {
-    operator fun invoke(intervalMs: Long = 2_000L): Flow<RamSnapshot?> = flow {
+    operator fun invoke(intervalMs: Long = 2_000L): Flow<RamSnapshot> = flow {
         while (currentCoroutineContext().isActive) {
-            emit(provider.snapshot())
+            provider.snapshot()?.let { emit(it) }
             delay(intervalMs)
         }
     }.flowOn(Dispatchers.IO)

@@ -1,65 +1,158 @@
 package com.cleanforge.core.scanner
 
-import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.FileOperationBackend
 import com.cleanforge.core.backend.PackageInventory
-import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.model.CleaningCategory
 import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
 import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import java.util.concurrent.TimeUnit
 
-/**
- * WhatsApp / WhatsApp Business. Android/media is reachable with All-files access (only Android/data and Android/obb
- * need Shizuku), so this scanner uses the standard backend and its items are deleted by the app process.
- *
- *  - `.Statuses`: status media older than 24 h.
- *  - `Sent` folders: WhatsApp's own copy of media you sent. NOT proven to exist elsewhere (an edited or forwarded
- *    file may have no other copy), so it is ELEVATED/MEDIUM and always the user's call.
- *  - `Databases/msgstore-*`: local chat backups older than 7 days; the newest one is always kept.
- */
 class WhatsAppScanner(
-    backend: FileReadBackend,
-    inventory: PackageInventory,
-    private val root: String = PathRules.ROOT,
-    timeProvider: () -> Long = { System.currentTimeMillis() }
-) : ForensicFolderScanner(backend, inventory, timeProvider) {
+    private val backend: FileOperationBackend,
+    private val inventory: PackageInventory,
+    private val storage: String,
+    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+) : Scanner {
 
     override val id = "whatsapp_forensics"
-    override val displayName = "WhatsApp media & backups"
+    override val displayName = "WhatsApp Forensics"
+    // Android/media is accessible via MANAGE_EXTERNAL_STORAGE, not Shizuku.
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.ON_DEMAND
 
-    override val packages = listOf("com.whatsapp", "com.whatsapp.w4b")
+    private val pkg = "com.whatsapp"
+    private val pkgBusiness = "com.whatsapp.w4b"
 
-    override fun targets(pkg: String): List<Target> {
-        val base = "$root/Android/media/$pkg/WhatsApp"
-        val sentReason = "Copy WhatsApp keeps of media you sent. It may be the only copy of an edited or forwarded file, so check before deleting."
-        fun sent(folder: String) = Target(
-            dir = "$base/Media/$folder/Sent",
-            reason = sentReason,
-            minAgeMs = 0L,
-            confidence = ConfidenceLevel.MEDIUM,
-            risk = RiskLevel.ELEVATED
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        val isInstalled = inventory.isCurrentlyInstalled(pkg) || inventory.isCurrentlyInstalled(pkgBusiness)
+        if (!isInstalled) return@flow
+
+        val activePkg = if (inventory.isCurrentlyInstalled(pkg)) pkg else pkgBusiness
+        val mediaBase = "$storage/Android/media/$activePkg/WhatsApp/Media"
+        val dbBase = "$storage/Android/media/$activePkg/WhatsApp/Databases"
+        val now = timeProvider()
+        val batch = mutableListOf<ScanItem>()
+
+        // --- 1. .Statuses (expired > 24h) ---
+        scanFolder(
+            folderPath = "$mediaBase/.Statuses",
+            now = now,
+            minAgeMs = TimeUnit.HOURS.toMillis(24),
+            reasonForFlagging = "WhatsApp Status (Expired >24h)",
+            confidence = ConfidenceLevel.HIGH,
+            risk = RiskLevel.SAFE,
+            pkg = activePkg,
+            batch = batch
+        ) { emit(it) }
+
+        // --- 2. Sent folders (duplicates of gallery) ---
+        val sentTargets = listOf(
+            "$mediaBase/WhatsApp Video/Sent" to "WhatsApp Sent Video (Already in Gallery)",
+            "$mediaBase/WhatsApp Images/Sent" to "WhatsApp Sent Image (Already in Gallery)",
+            "$mediaBase/WhatsApp Animated Gifs/Sent" to "WhatsApp Sent GIF (Already in Gallery)"
         )
-        return listOf(
-            Target(
-                dir = "$base/Media/.Statuses",
-                reason = "WhatsApp status media; statuses expire after 24 hours.",
-                minAgeMs = TimeUnit.HOURS.toMillis(24),
+        sentTargets.forEach { (path, reason) ->
+            scanFolder(
+                folderPath = path,
+                now = now,
+                minAgeMs = 0L,
+                reasonForFlagging = reason,
                 confidence = ConfidenceLevel.HIGH,
-                risk = RiskLevel.SAFE
-            ),
-            sent("WhatsApp Video"),
-            sent("WhatsApp Images"),
-            sent("WhatsApp Animated Gifs"),
-            Target(
-                dir = "$base/Databases",
-                reason = "Older local chat backup; the newest one is kept. Only copy of that day's chats if cloud backup is off.",
-                minAgeMs = TimeUnit.DAYS.toMillis(7),
-                confidence = ConfidenceLevel.HIGH,
-                risk = RiskLevel.ELEVATED,
-                nameFilter = { it.startsWith("msgstore-") },
-                keepNewest = 1
-            )
-        )
+                risk = RiskLevel.SAFE,
+                pkg = activePkg,
+                batch = batch
+            ) { emit(it) }
+        }
+
+        // --- 3. Old database backups (keep newest, delete rest > 7 days) ---
+        runCatching {
+            val childNames = backend.list(dbBase) ?: return@runCatching
+            val dbFiles = childNames
+                .filter { it.startsWith("msgstore-") }
+                .mapNotNull { name ->
+                    val fullPath = "$dbBase/$name"
+                    backend.lstat(fullPath)?.let { stat -> fullPath to stat }
+                }
+                .sortedByDescending { (_, stat) -> stat.mtimeMs }
+
+            dbFiles.drop(1).forEach { (fullPath, stat) ->
+                val ageDays = TimeUnit.MILLISECONDS.toDays(now - stat.mtimeMs)
+                if (ageDays > 7) {
+                    batch.add(
+                        ScanItem(
+                            path = fullPath,
+                            sizeBytes = stat.size,
+                            category = CleaningCategory.FORENSIC_MEDIA,
+                            reasonForFlagging = "Old WhatsApp Backup ($ageDays days old)",
+                            confidence = ConfidenceLevel.HIGH,
+                            risk = RiskLevel.SAFE,
+                            owningPackage = activePkg,
+                            requiresShizuku = false,
+                            deleteMode = DeleteMode.FILE,
+                            reversibility = Reversibility.NOT_REVERSIBLE,
+                            lastModified = stat.mtimeMs,
+                            fingerprint = stat,
+                            isPreselected = false
+                        )
+                    )
+                }
+            }
+        }
+
+        if (batch.isNotEmpty()) { emit(batch.toList()); batch.clear() }
+    }.flowOn(Dispatchers.IO)
+
+    private suspend fun scanFolder(
+        folderPath: String,
+        now: Long,
+        minAgeMs: Long,
+        reasonForFlagging: String,
+        confidence: ConfidenceLevel,
+        risk: RiskLevel,
+        pkg: String,
+        batch: MutableList<ScanItem>,
+        emitBlock: suspend (List<ScanItem>) -> Unit
+    ) {
+        runCatching {
+            val childNames = backend.list(folderPath) ?: return@runCatching
+            childNames.forEach { name ->
+                val fullPath = "$folderPath/$name"
+                val stat = backend.lstat(fullPath) ?: return@forEach
+                if (stat.type == com.cleanforge.core.fs.FsType.FILE) {
+                    val age = now - stat.mtimeMs
+                    if (age >= minAgeMs) {
+                        batch.add(
+                            ScanItem(
+                                path = fullPath,
+                                sizeBytes = stat.size,
+                                category = CleaningCategory.FORENSIC_MEDIA,
+                                reasonForFlagging = reasonForFlagging,
+                                confidence = confidence,
+                                risk = risk,
+                                owningPackage = pkg,
+                                requiresShizuku = false,
+                                deleteMode = DeleteMode.FILE,
+                                reversibility = Reversibility.NOT_REVERSIBLE,
+                                lastModified = stat.mtimeMs,
+                                fingerprint = stat,
+                                isPreselected = false
+                            )
+                        )
+                        if (batch.size >= BATCH_SIZE) {
+                            emitBlock(batch.toList())
+                            batch.clear()
+                        }
+                    }
+                }
+            }
+        }
+        // Silently skip if folder doesn't exist
     }
 }

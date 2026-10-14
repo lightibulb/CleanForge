@@ -35,8 +35,7 @@ object MemInfoParser {
             bytes[key] = number * multiplier
         }
 
-        // A zero or negative total is corrupt input: a snapshot built from it would read as CRITICAL pressure.
-        val total = bytes["MemTotal"]?.takeIf { it > 0L } ?: return null
+        val total = bytes["MemTotal"] ?: return null
 
         val free = bytes["MemFree"] ?: 0L
         val buffers = bytes["Buffers"] ?: 0L

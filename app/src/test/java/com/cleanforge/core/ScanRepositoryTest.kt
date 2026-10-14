@@ -131,4 +131,18 @@ class ScanRepositoryTest {
         repo.forget(setOf("$ROOT/Download/a.bin"))
         assertThat(repo.items.value.map { it.path }).containsExactly("$ROOT/Download/b.bin")
     }
+
+    @Test fun `asking stops at the first operation that is not usable`() = runTest {
+        val asked = mutableListOf<PrivilegedOperation>()
+        val scanner = FakeScanner("shizuku", Requirement.SHIZUKU, reads, listOf(item("a.bin")))
+        val repo = ScanRepository(
+            setOf(scanner),
+            caps { op ->
+                asked += op
+                capability(op, CapabilityStatus.UNSUPPORTED, "not here")
+            }
+        )
+        repo.scan(ScanMode.QUICK).toList()
+        assertThat(asked).hasSize(1)
+    }
 }

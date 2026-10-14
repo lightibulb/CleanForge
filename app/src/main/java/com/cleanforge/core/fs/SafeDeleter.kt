@@ -1,19 +1,18 @@
+// core/fs/SafeDeleter.kt
 package com.cleanforge.core.fs
 
 /**
  * The single implementation of deletion. Used by the app process AND by the Shizuku service.
- *
  * Guarantees:
- *  - symlinks are never followed; a symlink target/root is refused, a symlink child is unlinked as a link only;
- *  - recursion is explicit-depth-bounded and entry-bounded;
- *  - a different st_dev (mount point) below the root is never entered or deleted;
- *  - the root's (dev, ino) must match what the scan saw, and each directory is re-checked
- *    immediately before its entries are removed;
- *  - every entry (file, link, sub-folder, the root itself) is lstat'ed AGAIN immediately before remove() and is
- *    left alone, with a recorded problem, unless it is still the same object (type, device, inode) that was
- *    inspected a moment earlier;
- *  - no shell, no command line, no path concatenation outside "<dir>/<plain name>".
- *
+ * - symlinks are never followed; a symlink target/root is refused, a symlink child is unlinked as a link only;
+ * - recursion is explicit-depth-bounded and entry-bounded;
+ * - a different st_dev (mount point) below the root is never entered or deleted;
+ * - the root's (dev, ino) must match what the scan saw, and each directory is re-checked
+ *   immediately before its entries are removed;
+ * - every entry (file, link, sub-folder, the root itself) is lstat'ed AGAIN immediately before remove() and is
+ *   left alone, with a recorded problem, unless it is still the same object (type, device, inode) that was
+ *   inspected a moment earlier;
+ * - no shell, no command line, no path concatenation outside "<dir>/<plain name>".
  * Residual risk (documented in SECURITY.md): the re-check and remove() are still two separate path-based
  * calls, so an attacker with write access to the same directory who wins that microsecond race can swap an entry
  * in between. Android offers no unlinkat/openat from Kotlin. A swap can never make remove() follow a symlink:
@@ -22,28 +21,68 @@ package com.cleanforge.core.fs
 class SafeDeleter(
     private val fs: FsOps,
     private val limits: WalkLimits = WalkLimits(maxDepth = 48, maxEntries = 200_000),
-    /**
-     * Polled between entries. When it returns true the walk stops BEFORE touching the next entry and the result is
-     * [DeleteStatus.CANCELLED] (or [DeleteStatus.PARTIAL]-like counts in the result). Never interrupts a single
-     * remove() call, and never changes deletion order or identity checks.
+    /*
+     Polled between entries. When it returns true the walk stops BEFORE touching the next entry and the result is
+     [DeleteStatus.CANCELLED] (or [DeleteStatus.PARTIAL]-like counts in the result). Never interrupts a single
+     remove() call, and never changes deletion order or identity checks.
      */
-    private val isCancelled: () -> Boolean = { false }
+    private val isCancelled: () -> Boolean = { false },
+    /**
+     * The system-owned storage root. Only folders BELOW it are inspected as ancestors of the target; the system's own
+     * directories above it are not ours to judge (see [ancestorsAreSafe]).
+     */
+    private val trustedRoot: String = PathRules.ROOT
 ) {
-
     fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult {
+        // 1. Initial check on the target itself
         val st = fs.lstat(path) ?: return DeleteResult(DeleteStatus.MISSING, detail = "Path does not exist")
+        
         if (st.type == FsType.SYMLINK) {
             return DeleteResult(DeleteStatus.WRONG_TYPE, detail = "Refusing to act on a symbolic link")
         }
+        
         if (expected != null && !st.sameObjectAs(expected)) {
             return DeleteResult(DeleteStatus.IDENTITY_CHANGED, detail = "Object changed since it was scanned")
         }
+
+        // 2. Every folder between the storage root and the target must still be a real directory (not a link).
+        // This closes the TOCTOU gap between FileServiceCore's check and this execution.
+        if (!ancestorsAreSafe(path)) {
+            return DeleteResult(DeleteStatus.REFUSED, detail = "One or more parent directories are unsafe (symlink/non-dir)")
+        }
+
         return when (mode) {
             DeleteMode.FILE -> removeLeaf(path, st, FsType.FILE)
             DeleteMode.EMPTY_DIR -> removeLeaf(path, st, FsType.DIRECTORY)
             DeleteMode.CONTENTS_ONLY -> removeDirectory(path, st, removeRoot = false)
             DeleteMode.TREE -> removeDirectory(path, st, removeRoot = true)
         }
+    }
+
+    /**
+     * Every folder between [trustedRoot] and [path] must be a real directory, never a symlink or a file.
+     *
+     * Only the part BELOW [trustedRoot] is inspected. The directories above it belong to the system: on Android
+     * "/storage" is a tmpfs, a different device than the shared-storage mount, so comparing device numbers up there
+     * made every real deletion come back REFUSED. Device numbers of ancestors are deliberately not compared at all:
+     * a mount point among the ancestors cannot redirect the deletion, and mounts INSIDE the tree are handled in
+     * [purge]. A path that is not under [trustedRoot] (only tests; the validators confine production paths to
+     * PathRules.ROOT) has all of its ancestors inspected.
+     */
+    private fun ancestorsAreSafe(path: String): Boolean {
+        val parts = path.split('/').filter { it.isNotEmpty() }
+        if (parts.size < 2) return true
+        val rootParts = trustedRoot.split('/').filter { it.isNotEmpty() }
+        val underRoot = parts.size > rootParts.size && parts.subList(0, rootParts.size) == rootParts
+        val firstInspected = if (underRoot) rootParts.size else 0
+        var current = ""
+        for (i in 0 until parts.size - 1) { // the last part is the target itself, already inspected
+            current += "/" + parts[i]
+            if (i < firstInspected) continue
+            val stat = fs.lstat(current) ?: return false // a missing parent is fatal
+            if (stat.type != FsType.DIRECTORY) return false // lstat reports a link as SYMLINK, so links land here
+        }
+        return true
     }
 
     private fun removeLeaf(path: String, st: FsStat, expectedType: FsType): DeleteResult {

@@ -47,6 +47,7 @@ class PlanBuilder @Inject constructor(private val validator: SafetyValidator) {
         // Everything that is a candidate counts as "going away", even if it is refused further down: that can
         // only make the rule stricter, never looser.
         val deleting = afterOverlap.mapTo(HashSet<String>()) { it.path }
+        fun insideCleanedFolder(path: String) = folderRoots.any { path.startsWith("$it/") }
         val copiesByGroup: Map<String, List<ScanItem>> = scanned
             .filter { it.category == CleaningCategory.DUPLICATE && it.groupId != null }
             .groupBy { it.groupId ?: "" }
@@ -58,12 +59,14 @@ class PlanBuilder @Inject constructor(private val validator: SafetyValidator) {
                 continue
             }
             val copies = item.groupId?.let { copiesByGroup[it] }.orEmpty()
-            val survivor = copies.firstOrNull { it.path != item.path && it.path !in deleting && it.fingerprint != null }
+            val others = copies.filter { it.path != item.path && it.path !in deleting && it.fingerprint != null }
+            // A copy inside a folder that is being emptied in the same run is not a keeper: it goes away too.
+            val survivor = others.firstOrNull { !insideCleanedFolder(it.path) }
             if (survivor == null) {
-                val why = if (copies.size < 2) {
-                    "The other copies of this file are unknown; scan again"
-                } else {
-                    "Every copy of this file is selected; at least one must stay"
+                val why = when {
+                    copies.size < 2 -> "The other copies of this file are unknown; scan again"
+                    others.isNotEmpty() -> "The only other copy lies in a folder that is also being cleaned; at least one must stay"
+                    else -> "Every copy of this file is selected; at least one must stay"
                 }
                 rejected += RejectedItem(item, why)
                 continue
@@ -76,7 +79,10 @@ class PlanBuilder @Inject constructor(private val validator: SafetyValidator) {
         val plannedPaths = planned.mapTo(HashSet<String>()) { it.path }
         val wholeGroupPaths = HashSet<String>()
         for (copies in copiesByGroup.values) {
-            if (copies.all { it.path in plannedPaths }) copies.mapTo(wholeGroupPaths) { it.path }
+            // "Going away" also covers a copy that lies inside a folder emptied in the same run.
+            if (copies.all { it.path in plannedPaths || insideCleanedFolder(it.path) }) {
+                copies.mapTo(wholeGroupPaths) { it.path }
+            }
         }
         val finalItems = ArrayList<ScanItem>()
         for (item in planned) {

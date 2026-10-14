@@ -36,9 +36,8 @@ CleanForge deletes files. The design goal is that it can never delete something 
 
 Forensic scanners target known app-specific cache/media patterns. They are strictly narrower than a general walk:
 
-- Category `FORENSIC_MEDIA`, `isQuick = false` (on-demand only), `isPreselected = false` (derived, always false for this category), `DeleteMode.FILE` only.
-- WhatsApp and Telegram live under `Android/media`, which All-files access can reach: their items use the app process (`requiresShizuku = false`). The Shizuku service has no single-file delete, so the TikTok / Twitter-X / Instagram scanners are not registered until it does.
-- Paths are matched against a **per-package, per-subfolder allowlist** in `SafetyValidator.isKnownForensicPath()`: a single file that is a DIRECT child of one exact folder (not the folder, not nested deeper), and `owningPackage` must equal the package in the path. No wildcard `Android/data` or `Android/media` access.
+- Category `FORENSIC_MEDIA`, `isQuick = false` (on-demand only), `requiresShizuku = true`, `isPreselected = false`, `DeleteMode.FILE` only.
+- Paths are matched against a **per-package, per-subfolder allowlist** in `SafetyValidator.isKnownForensicPath()`. No wildcard `Android/data` or `Android/media` access.
 - Allowed shapes include `Android/media/<pkg>/WhatsApp/Media/.Statuses/*`, `.../Sent/*`, `.../Databases/msgstore-*`, `Android/media/<pkg>/Telegram/Telegram {Video,Audio,Images,Documents}/*`, and `Android/data/<pkg>/cache/*` for TikTok / Twitter-X / Instagram.
 - Messaging apps (WhatsApp, Telegram, Instagram, Signal, Messenger, etc. in `ProtectedApps.MESSAGING`) are never pre-selected and get an extra caution layer.
 - Forensic rules never apply inside personal folders; the personal-zone protection blocks them.

@@ -1,76 +1,73 @@
 package com.cleanforge.domain.usecase
 
-import com.cleanforge.core.backend.InstallState
 import com.cleanforge.core.backend.PackageInventory
 import com.cleanforge.core.memory.BackgroundProcessKiller
 import com.cleanforge.core.memory.ClearMemoryResult
 import com.cleanforge.core.memory.MemoryInfoProvider
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
- * The real, limited, honest RAM-clear. It asks Android to stop BACKGROUND processes of apps that are installed right
- * now (tri-state [InstallState]: an UNKNOWN answer is never treated as installed), then MEASURES the change in
- * available memory instead of inventing a number.
+ * The real, limited, honest RAM-clear.
+ *
+ * It delegates the actual trim request to [BackgroundProcessKiller], which skips
+ * CleanForge itself, system apps, and unknown app types.
+ *
+ * It then MEASURES the actual change in available memory instead of inventing a number.
  */
 class ClearMemoryUseCase @Inject constructor(
     private val killer: BackgroundProcessKiller,
     private val inventory: PackageInventory,
     private val provider: MemoryInfoProvider
 ) {
-    /** How long the kernel gets to reclaim pages before the second reading. Tests set it to 0. */
-    internal var settleDelayMs: Long = 600L
 
     suspend operator fun invoke(): ClearMemoryResult = withContext(Dispatchers.IO) {
         val before = provider.snapshot()
-
         var requested = 0
-        val known = inventory.knownPackageNames()
-        if (known != null) {
-            for (pkg in known) {
-                ensureActive()
-                if (inventory.installState(pkg) != InstallState.INSTALLED) continue
-                try {
-                    if (killer.kill(pkg)) requested++
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (e: Exception) {
-                    // Per-package failures are expected (security exception, protected app). Skip it.
-                }
+
+        val installed: Iterable<String> = inventory.knownPackageNames()
+            ?.filter { inventory.isCurrentlyInstalled(it) }
+            ?: emptySet()
+
+        var count = 0
+        for (pkg in installed) {
+            // Periodic cancellation check for large package lists.
+            if (count++ % 64 == 0) {
+                currentCoroutineContext().ensureActive()
+            }
+
+            if (killer.kill(pkg)) {
+                requested++
             }
         }
 
-        if (settleDelayMs > 0) delay(settleDelayMs)
+        // Give the kernel a beat to actually reclaim the pages.
+        delay(600L)
+
         val after = provider.snapshot()
 
-        val measured = before != null && after != null
         val freed = if (before != null && after != null) {
             (after.availableBytes - before.availableBytes).coerceAtLeast(0L)
-        } else 0L
+        } else {
+            0L
+        }
+
+        val note = if (before == null || after == null) {
+            "Memory info was unavailable, so no measured change could be calculated."
+        } else {
+            "Freed ${freed / (1024 * 1024)} MB for now. Android may reload these apps, which can use more battery."
+        }
 
         ClearMemoryResult(
-            packagesRequested = requested,
+            processesTouched = requested,
             freedBytes = freed,
             before = before,
             after = after,
-            note = noteFor(requested, freed, measured)
+            note = note
         )
-    }
-
-    private fun noteFor(requested: Int, freedBytes: Long, measured: Boolean): String {
-        val reload = "Android may reload these apps, which can use more battery."
-        return when {
-            !measured ->
-                "Asked Android to trim background processes of $requested app(s), but memory could not be read, so the effect is unknown. $reload"
-            freedBytes == 0L ->
-                "No measurable gain in available memory (asked about $requested app(s)). Android was already managing it. $reload"
-            else ->
-                "Available memory rose by about ${freedBytes / (1024 * 1024)} MB right after asking Android to trim $requested app(s). " +
-                    "Other activity can change this number too. $reload"
-        }
     }
 }

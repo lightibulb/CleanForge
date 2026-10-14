@@ -73,4 +73,8 @@ class ForensicValidatorTest {
         assertThat(reason("$ROOT/Android/data/com.twitter.android/cache/a.bin", pkg = "com.twitter.android")).isNull()
         assertThat(reason("$ROOT/Android/data/com.instagram.android/databases/a.db", pkg = "com.instagram.android")).isNotNull()
     }
+
+    @Test fun `a differently cased package folder is not the allowlisted package`() {
+        assertThat(reason("$ROOT/Android/media/com.WhatsApp/WhatsApp/Media/.Statuses/a.mp4", pkg = "com.WhatsApp")).isNotNull()
+    }
 }

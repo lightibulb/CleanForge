@@ -32,13 +32,11 @@ All forensic items are **never pre-selected** — the user always decides.
 
 | App | What's scanned | Safety rule |
 |-----|---------------|-------------|
-| WhatsApp / WhatsApp Business | `.Statuses` (>24h), `Sent` folders, old DB backups (>7d, newest kept) | All-files access (no Shizuku), single files only |
-| Telegram | Video/Audio/Images/Documents downloads (>14d) | All-files access (no Shizuku), single files only |
-| TikTok / TikTok Lite | Video cache, `.music` cache (>7d) | **Not active yet**: needs a Shizuku single-file delete that does not exist |
-| Twitter/X / X Lite | Media cache (>7d) | **Not active yet** (same reason; `cache/` is already offered as an app cache) |
-| Instagram / Instagram Lite | Media cache (>14d) | **Not active yet** (same reason) |
-
-`Android/media` is reachable with All-files access; only `Android/data` and `Android/obb` need Shizuku.
+| WhatsApp / WhatsApp Business | `.Statuses` (>24h), `Sent` folders, old DB backups (>7d) | Shizuku required, FILE mode only |
+| Telegram | Video/Audio/Images/Documents cache (>14d) | Shizuku required, FILE mode only |
+| TikTok / TikTok Lite | Video cache, `.music` cache (>7d) | Shizuku required, FILE mode only |
+| Twitter/X / X Lite | Media cache (>7d) | Shizuku required, FILE mode only |
+| Instagram / Instagram Lite | Media cache (>14d) | Shizuku required, FILE mode only |
 
 ### 📱 Shizuku Integration (Part 2)
 On Android 11+, `Android/data` and `Android/obb` are invisible to normal apps.

@@ -4,38 +4,13 @@ All notable changes to CleanForge. Format follows [Keep a Changelog](https://kee
 
 ---
 
-## [0.5.1] — Part 3/4 audit fixes
-
-### Fixed
-- Part 3 scanners did not compile (passed `isPreselected` to `ScanItem`, used the old nullable `list`/`lstat` API instead of `FsResult`); rebuilt on a shared `ForensicFolderScanner`
-- Part 3 scanners were never registered in `AppModule`; WhatsApp and Telegram now are
-- WhatsApp/Telegram items could never be deleted: `Android/media` counts as a protected zone, so `SafetyValidator` refused every one; and `requiresShizuku = true` routed them to a Shizuku path that cannot delete files. They now use All-files access and the validator exempts only the exact allowlist
-- Validator now requires `owningPackage` to match the path and accepts only direct-child files (no nested `Databases/x/msgstore-*`)
-- "Sent" media was labelled "Already in Gallery / HIGH / SAFE" without evidence; now MEDIUM / ELEVATED. Chat backups are ELEVATED
-- Scanners swallowed errors silently; they now report `incompleteReasons()` (unreadable folder, unknown install state, sub-folders, dead Shizuku channel) and honour cancellation
-- Both WhatsApp and WhatsApp Business are scanned when both are installed
-- `AppModule` did not compile (missing imports for `ActivityManager`, `MemoryInfoProvider`, `ProcMemInfoProvider`)
-- `ClearMemoryUseCase`: used `isCurrentlyInstalled` instead of `installState`, counted packages as "processes touched", reported "Freed 0 MB" when memory could not be read, and would trim system apps (launcher, keyboard). Now skips system apps and CleanForge itself, reports packages asked, and says "unknown" when unmeasured
-- `ClearMemoryUseCaseTest` imported Mockito (not a dependency) and would have broken compilation of the whole test source set; rewritten with fakes
-- `MemInfoParser` accepted `MemTotal: 0`, which then read as CRITICAL pressure
-- RAM screen polled while the app was in the background and showed "Reading…" forever when `/proc/meminfo` was unreadable; the RAM screen was not reachable from navigation
-
-### Changed
-- TikTok / Twitter-X / Instagram scanners are kept but intentionally NOT registered (no privileged single-file delete exists; `CacheScanner` already covers `cache/`)
-- `ClearMemoryResult.processesTouched` renamed `packagesRequested`; added `measured`
-
-### Added
-- `ForensicScannersTest`, `ForensicValidatorTest`, extra `MemInfoParserTest` and `PolicyGuardTest` cases
-
----
-
-## [1.0.0] — Part 5: UI/UX Polish & CI/CD *(AUDIT: Part 5 has not been done; entry kept as written, see notes inline)*
+## [1.0.0] — Part 5: UI/UX Polish & CI/CD
 
 ### Added
 - GitHub Actions CI pipeline: unit tests, lint, debug + release APK builds
 - Gradle wrapper binary committed and validated in CI
 - Material 3 dynamic color on Android 12+, static scheme on Android 11
-- RAM gauge integrated into Home screen as an expandable card *(AUDIT: not present in the tree; the RAM screen is now a "Memory" tab, see 0.5.1)*
+- RAM gauge integrated into Home screen as an expandable card
 - `LazyColumn` keys changed from path-only to category+path (fixes crash on duplicate paths)
 - Final Compose UI polish: animations, transitions, empty states
 

@@ -1,0 +1,1788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE8">
+<title>CleanForge — a quieter way to tidy up</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<script>
+(function(){
+  try {
+    var p = JSON.parse(localStorage.getItem('cleanforge.prefs') || '{}');
+    if (p.dark === true) document.documentElement.classList.add('dark');
+  } catch(e) {}
+})();
+</script>
+<style>
+  :root {
+    --bg:            #F4EFE8;
+    --bg-2:          #EDE6DC;
+    --surface:       #FFFFFF;
+    --surface-2:     #FBF7F1;
+    --surface-3:     #F6F0E8;
+
+    --ink:           #2A231E;
+    --ink-2:         #6B6058;
+    --ink-3:         #A2988C;
+
+    --line:          #EAE1D5;
+    --line-2:        #F2EBE0;
+
+    --clay:          #C15C2E;
+    --clay-2:        #A84A21;
+    --clay-soft:     #F7E4D6;
+    --clay-tint:     #FBF1E8;
+
+    --sage:          #7C8A6C;
+    --sage-soft:     #E6EBDC;
+    --amber:         #D9A441;
+    --amber-soft:    #F8ECD0;
+    --brick:         #B8452F;
+    --brick-soft:    #F8DCD6;
+
+    --r-sm: 10px;
+    --r-md: 16px;
+    --r-lg: 22px;
+    --r-xl: 28px;
+    --r-pill: 999px;
+
+    --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+    --ease-soft:   cubic-bezier(0.4, 0, 0.2, 1);
+    --theme-dur:   0.35s;
+  }
+
+  /* ═════════════════════════════════════════
+     DARK MODE — Neutral bg + Muted Emerald solid cards
+     Coral accent
+     ═════════════════════════════════════════ */
+  html.dark {
+    --bg:            #101014;
+    --bg-2:          #17171C;
+
+    /* Solid muted emerald surfaces */
+    --surface:       #1E2A23;
+    --surface-2:     #1A2520;
+    --surface-3:     #243028;
+
+    --ink:           #F3F0EB;
+    --ink-2:         #B4AEA6;
+    --ink-3:         #787470;
+
+    --line:          #2A342D;
+    --line-2:        #2F3931;
+
+    --clay:          #FF9E7C;
+    --clay-2:        #FFB8A0;
+    --clay-soft:     #3A2118;
+    --clay-tint:     #2B1811;
+
+    --sage:          #A9B89E;
+    --sage-soft:     #1D2820;
+    --amber:         #E5B65C;
+    --amber-soft:    #2E2418;
+    --brick:         #F08B7A;
+    --brick-soft:    #2E1815;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html {
+    background: var(--bg);
+    height: 100%;
+    transition: background-color var(--theme-dur) var(--ease-soft);
+  }
+  body {
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                color var(--theme-dur) var(--ease-soft);
+  }
+
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.045;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  html.dark body::after { opacity: 0.02; }
+
+  button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  ::selection { background: var(--clay-soft); color: var(--ink); }
+
+  /* Theme transition — smooth color swap */
+  html.theme-switching *,
+  html.theme-switching *::before,
+  html.theme-switching *::after {
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft) !important;
+  }
+
+  .app {
+    max-width: 440px;
+    margin: 0 auto;
+    height: 100vh;
+    height: 100dvh;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+    transition: background-color var(--theme-dur) var(--ease-soft);
+  }
+
+  /* ═════════════════════════════════════════
+     Topbar — absolute overlay, cards scroll UNDER it
+     ═════════════════════════════════════════ */
+  .topbar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 30;
+    padding: 24px 24px 16px;
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: blur(20px) saturate(1.6);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    transition: padding 0.3s var(--ease-soft),
+                background-color var(--theme-dur) var(--ease-soft),
+                box-shadow 0.3s var(--ease-soft);
+    border-bottom: 1px solid transparent;
+  }
+  @supports not (background: color-mix(in srgb, red, blue)) {
+    .topbar { background: rgba(244,239,232,0.78); }
+    html.dark .topbar { background: rgba(16,16,20,0.78); }
+  }
+  html.dark .topbar {
+    background: color-mix(in srgb, var(--bg) 76%, transparent);
+  }
+  .topbar.scrolled {
+    padding: 14px 24px 12px;
+    border-bottom-color: var(--line);
+    box-shadow: 0 8px 24px -18px rgba(0,0,0,0.35);
+  }
+  html.dark .topbar.scrolled {
+    box-shadow: 0 8px 24px -18px rgba(0,0,0,0.9);
+  }
+
+  .topbar-title {
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 400;
+    font-size: 30px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--ink);
+    overflow: hidden;
+    padding: 4px 0 6px;
+    display: block;
+    white-space: nowrap;
+    transition: font-size 0.3s var(--ease-soft), color var(--theme-dur);
+  }
+  .topbar.scrolled .topbar-title { font-size: 24px; }
+
+  /* Per-letter counter animation */
+  .title-letter {
+    display: inline-block;
+    white-space: pre;
+    will-change: transform, opacity;
+    animation: titleRoll 0.6s cubic-bezier(0.22, 1.3, 0.36, 1) both;
+  }
+  @keyframes titleRoll {
+    0%   { transform: translateY(110%); opacity: 0; }
+    55%  { opacity: 1; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+
+  .topbar-sub {
+    font-size: 13px;
+    color: var(--ink-2);
+    margin-top: 2px;
+    transition: opacity 0.25s, height 0.25s, color var(--theme-dur);
+  }
+  .topbar.scrolled .topbar-sub { opacity: 0; height: 0; margin: 0; }
+
+  /* ═════════════════════════════════════════
+     Content — scrolls behind topbar
+     ═════════════════════════════════════════ */
+  .content {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 0 160px;
+    scrollbar-width: none;
+    z-index: 10;
+  }
+  .content::-webkit-scrollbar { display: none; }
+
+  /* Reserve space for topbar + verse */
+  .content-inner {
+    padding-top: 108px;
+    transition: padding-top 0.4s var(--ease-soft);
+  }
+  body.verses-on .content-inner { padding-top: 250px; }
+
+  .screen { display: none; }
+  .screen.active {
+    display: block;
+    animation: screenIn 0.5s var(--ease-out) both;
+  }
+  @keyframes screenIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .reveal {
+    animation: reveal 0.6s var(--ease-out) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
+  @keyframes reveal {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ═════════════════════════════════════════
+     Welcome verse — fixed behind content
+     ═════════════════════════════════════════ */
+  .welcome-host {
+    position: fixed;
+    top: 106px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 440px;
+    padding: 0 32px;
+    text-align: center;
+    z-index: 5;
+    pointer-events: none;
+    transition: opacity 0.35s var(--ease-soft);
+    will-change: opacity;
+  }
+  .welcome-host:empty { display: none; }
+
+  .verse-welcome {
+    padding: 8px 0 16px;
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  .verse-welcome.show {
+    animation: verseIn 1.3s var(--ease-out) forwards;
+  }
+  @keyframes verseIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .verse-welcome::before {
+    content: '';
+    display: block;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--clay);
+    margin: 0 auto 12px;
+    opacity: 0.6;
+  }
+  .verse-welcome .verse-text {
+    font-family: 'Fraunces', Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 14.5px;
+    line-height: 1.72;
+    letter-spacing: -0.005em;
+    color: var(--ink-2);
+  }
+  .verse-welcome .verse-ref {
+    margin-top: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--clay);
+    opacity: 0.9;
+  }
+
+  /* ═════════════════════════════════════════
+     Cards — SOLID colors
+     ═════════════════════════════════════════ */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-lg);
+    margin: 10px 20px;
+    padding: 20px;
+    box-shadow: 0 1px 2px rgba(60,44,32,0.03), 0 4px 16px rgba(60,44,32,0.035);
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft),
+                box-shadow var(--theme-dur) var(--ease-soft);
+  }
+  html.dark .card {
+    border-color: rgba(255,255,255,0.035);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.32);
+  }
+
+  /* Storage hero — solid, aligned */
+  .hero {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    margin: 10px 20px;
+    padding: 24px 22px;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-xl);
+    box-shadow: 0 1px 2px rgba(60,44,32,0.03), 0 8px 24px rgba(60,44,32,0.05);
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft),
+                box-shadow var(--theme-dur) var(--ease-soft);
+  }
+  html.dark .hero {
+    background: #223028;
+    border-color: rgba(255,255,255,0.04);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.38);
+  }
+  .ring { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+  .ring svg { width: 100px; height: 100px; transform: rotate(-90deg); display: block; }
+  .ring circle { transition: stroke-dashoffset 1.4s var(--ease-out), stroke var(--theme-dur); }
+  .ring .pct {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 22px; font-weight: 500;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+  .hero-info { min-width: 0; flex: 1; }
+  .hero-eyebrow {
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--clay);
+    margin-bottom: 6px;
+  }
+  .hero-number {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 32px; font-weight: 400;
+    letter-spacing: -0.025em; line-height: 1;
+    color: var(--ink);
+  }
+  .hero-label { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+
+  /* Info card */
+  .info-card {
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-lg);
+    margin: 10px 20px;
+    padding: 18px;
+    box-shadow: 0 1px 2px rgba(60,44,32,0.025);
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft),
+                box-shadow var(--theme-dur) var(--ease-soft);
+  }
+  html.dark .info-card {
+    border-color: rgba(255,255,255,0.03);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.28);
+  }
+  .info-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .info-glyph {
+    width: 26px; height: 26px; border-radius: 8px;
+    display: grid; place-items: center;
+    background: var(--clay-tint); color: var(--clay);
+    flex-shrink: 0; font-size: 14px;
+  }
+  .info-glyph.sage { background: var(--sage-soft); color: var(--sage); }
+  .info-title {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 16px; font-weight: 500;
+    letter-spacing: -0.01em; color: var(--ink);
+  }
+  .info-body {
+    font-size: 13.5px; color: var(--ink-2);
+    line-height: 1.55; margin-bottom: 14px;
+  }
+  .info-body em { font-style: italic; color: var(--ink); font-weight: 500; }
+  .info-body.last { margin-bottom: 0; }
+  .info-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 7px; padding: 11px 20px;
+    border-radius: var(--r-pill);
+    font-size: 13.5px; font-weight: 500;
+    letter-spacing: 0.005em;
+    transition: transform 0.18s var(--ease-spring),
+                background-color var(--theme-dur) var(--ease-soft),
+                color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft),
+                box-shadow var(--theme-dur) var(--ease-soft),
+                opacity 0.2s;
+    user-select: none; white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.94); }
+  .btn:disabled { opacity: 0.5; pointer-events: none; }
+
+  .btn-primary { background: var(--ink); color: #F6F0E8; box-shadow: 0 2px 8px rgba(42,35,30,0.18); }
+  .btn-primary:hover { background: #3A302A; }
+  html.dark .btn-primary {
+    background: var(--clay); color: #1A0F0A;
+    box-shadow: 0 2px 12px rgba(255,158,124,0.2);
+  }
+  html.dark .btn-primary:hover { background: var(--clay-2); }
+
+  .btn-clay {
+    background: var(--clay); color: #FFF6EF;
+    box-shadow: 0 3px 12px rgba(193,92,46,0.22);
+  }
+  .btn-clay:hover { background: var(--clay-2); }
+  html.dark .btn-clay { color: #1A0F0A; box-shadow: 0 3px 12px rgba(255,158,124,0.18); }
+
+  .btn-soft { background: var(--surface-3); color: var(--ink); border: 1px solid var(--line); }
+  .btn-soft:hover { background: var(--bg-2); }
+  .btn-outline { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .btn-outline:hover { background: var(--surface-3); }
+  .btn-ghost { color: var(--ink-2); padding: 10px 14px; }
+  .btn-ghost:hover { background: var(--surface-3); color: var(--ink); }
+  .btn-danger { background: transparent; color: var(--brick); font-weight: 600; }
+  .btn-danger:hover { background: var(--brick-soft); }
+  .btn-sm { padding: 9px 16px; font-size: 12.5px; }
+
+  /* Scan block */
+  .scan-block { margin: 18px 20px 8px; }
+  .scan-hint {
+    font-size: 13px; color: var(--ink-2);
+    line-height: 1.6; margin-bottom: 14px;
+    padding: 0 4px;
+  }
+  .scan-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .dots span { display: inline-block; animation: dotPulse 1.2s infinite; }
+  .dots span:nth-child(2) { animation-delay: 0.15s; }
+  .dots span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes dotPulse {
+    0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-2px); }
+  }
+
+  /* Notices */
+  .notice {
+    margin: 8px 20px;
+    padding: 14px 16px;
+    background: var(--amber-soft);
+    color: #6B4A0E;
+    border-radius: var(--r-md);
+    font-size: 12.5px; line-height: 1.55;
+    border: 1px solid rgba(217,164,65,0.25);
+    display: flex; gap: 10px; align-items: flex-start;
+    animation: reveal 0.4s var(--ease-out) both;
+  }
+  html.dark .notice { color: #E5B65C; border-color: rgba(229,182,92,0.2); }
+  .notice::before {
+    content: '';
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--amber);
+    margin-top: 6px; flex-shrink: 0;
+  }
+
+  /* Section header */
+  .section-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 24px 24px 6px;
+  }
+  .section-title {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--clay);
+  }
+  .section-meta {
+    font-size: 12px; color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Item rows */
+  .item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px 20px;
+    cursor: pointer;
+    transition: background-color 0.2s var(--ease-soft);
+    position: relative;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .item:last-child { border-bottom: none; }
+  .item:hover { background: var(--surface-2); }
+  .item:active { background: var(--surface-3); }
+  .item.selected { background: var(--clay-tint); }
+
+  .check {
+    width: 22px; height: 22px;
+    border-radius: 7px;
+    border: 1.5px solid var(--line);
+    background: var(--surface);
+    flex-shrink: 0; margin-top: 1px;
+    display: grid; place-items: center;
+    transition: all 0.25s var(--ease-spring);
+  }
+  .check svg {
+    width: 13px; height: 13px;
+    stroke: #FFFFFF; stroke-width: 3;
+    fill: none; stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 24; stroke-dashoffset: 24;
+    transition: stroke-dashoffset 0.3s var(--ease-out) 0.05s, stroke var(--theme-dur);
+  }
+  html.dark .check svg { stroke: #1A0F0A; }
+  .item.selected .check { background: var(--clay); border-color: var(--clay); transform: scale(1.05); }
+  .item.selected .check svg { stroke-dashoffset: 0; }
+
+  .item-body { flex: 1; min-width: 0; }
+  .item-name {
+    font-size: 14.5px; font-weight: 500;
+    color: var(--ink); letter-spacing: -0.005em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .item-reason {
+    font-size: 12.5px; color: var(--ink-2);
+    margin-top: 3px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .item-path {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10.5px; color: var(--ink-3);
+    margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .item-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .tag {
+    font-size: 10px; font-weight: 500;
+    padding: 3px 8px; border-radius: var(--r-pill);
+    letter-spacing: 0.02em; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .tag-safe   { background: var(--sage-soft);  color: #4F5F42; border-color: rgba(124,138,108,0.15); }
+  .tag-check  { background: var(--amber-soft); color: #8A6418; border-color: rgba(217,164,65,0.2); }
+  .tag-danger { background: var(--brick-soft); color: #8A2E1F; border-color: rgba(184,69,47,0.15); }
+  .tag-neutral{ background: var(--surface-3);  color: var(--ink-2); border-color: var(--line); }
+  html.dark .tag-safe    { background: rgba(169,184,158,0.14); color: #C6D3BB; border-color: rgba(169,184,158,0.2); }
+  html.dark .tag-check   { background: rgba(229,182,92,0.14); color: #E5B65C; border-color: rgba(229,182,92,0.2); }
+  html.dark .tag-danger  { background: rgba(240,139,122,0.14); color: #F0A092; border-color: rgba(240,139,122,0.2); }
+
+  .item-size {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 15px; font-weight: 500;
+    color: var(--ink); flex-shrink: 0; margin-top: 1px;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 40px 32px 12px;
+    color: var(--ink-3);
+    font-size: 13.5px; line-height: 1.7;
+    max-width: 320px; margin: 0 auto;
+  }
+  .empty-glyph { font-size: 28px; opacity: 0.35; margin-bottom: 12px; display: block; }
+
+  /* RAM screen */
+  .ram-wrap {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 20px 8px; gap: 22px;
+  }
+  .ram-gauge { position: relative; width: 180px; height: 180px; }
+  .ram-gauge svg { width: 180px; height: 180px; transform: rotate(-90deg); display: block; }
+  .ram-gauge circle { transition: stroke-dashoffset 1.4s var(--ease-out), stroke 0.6s; }
+  .ram-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .ram-pct {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 44px; font-weight: 400;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--ink);
+  }
+  .ram-pressure {
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-3); margin-top: 8px;
+  }
+  .ram-stats { text-align: center; }
+  .ram-used { font-size: 15px; font-weight: 500; color: var(--ink); }
+  .ram-avail { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .ram-result {
+    font-size: 12.5px; color: var(--ink-2);
+    text-align: center; min-height: 18px;
+  }
+  .ram-note {
+    margin: 8px 20px 0; padding: 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-lg);
+    font-size: 13px; line-height: 1.6; color: var(--ink-2);
+    transition: background-color var(--theme-dur), border-color var(--theme-dur);
+  }
+  .ram-note strong { color: var(--ink); font-weight: 600; }
+  .ram-note code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px;
+    background: var(--surface-3);
+    padding: 1px 6px; border-radius: 5px;
+    color: var(--clay);
+  }
+
+  /* About */
+  .about-hero {
+    margin: 10px 20px;
+    padding: 26px 22px;
+    border-radius: var(--r-xl);
+    background: var(--clay-tint);
+    border: 1px solid var(--line-2);
+    display: flex; gap: 18px; align-items: center;
+    box-shadow: 0 1px 2px rgba(60,44,32,0.025);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: transform 0.2s var(--ease-spring),
+                background-color var(--theme-dur),
+                border-color var(--theme-dur);
+  }
+  .about-hero:active { transform: scale(0.985); }
+  html.dark .about-hero {
+    background: #2B1811;
+    border-color: rgba(255,158,124,0.06);
+  }
+  .about-glyph {
+    width: 64px; height: 64px;
+    border-radius: 20px;
+    background: var(--clay);
+    display: grid; place-items: center;
+    font-size: 28px; flex-shrink: 0;
+    box-shadow: 0 6px 18px rgba(193,92,46,0.22);
+  }
+  html.dark .about-glyph { color: #1A0F0A; box-shadow: 0 6px 18px rgba(255,158,124,0.18); }
+  .about-name {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 24px; font-weight: 500;
+    letter-spacing: -0.02em; line-height: 1.1;
+  }
+  .about-by { font-size: 13.5px; color: var(--ink-2); margin-top: 4px; }
+  .about-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; }
+
+  .fact {
+    display: flex; gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .fact:last-child { border-bottom: none; padding-bottom: 4px; }
+  .fact:first-child { padding-top: 4px; }
+  .fact-glyph {
+    width: 34px; height: 34px;
+    border-radius: 11px;
+    display: grid; place-items: center;
+    background: var(--clay-tint); color: var(--clay);
+    flex-shrink: 0; font-size: 16px;
+  }
+  .fact-glyph.sage { background: var(--sage-soft); color: var(--sage); }
+  .fact-glyph.amber { background: var(--amber-soft); color: #A77A1E; }
+  .fact-glyph.brick { background: var(--brick-soft); color: var(--brick); }
+  html.dark .fact-glyph.amber { color: var(--amber); }
+  .fact-title {
+    font-size: 14px; font-weight: 600;
+    color: var(--ink); margin-bottom: 3px;
+  }
+  .fact-body { font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+
+  /* Settings rows */
+  .settings-row { display: flex; align-items: center; gap: 16px; padding: 4px 0; }
+  .settings-text { flex: 1; min-width: 0; }
+  .settings-title {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 16px; font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--ink); margin-bottom: 4px;
+  }
+  .settings-desc { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+
+  /* iOS-style switch */
+  .switch {
+    position: relative;
+    width: 46px; height: 28px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    border: 1px solid var(--line);
+    flex-shrink: 0; cursor: pointer;
+    transition: background-color 0.3s var(--ease-soft), border-color 0.3s;
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(60,44,32,0.18);
+    transition: transform 0.3s var(--ease-spring), background-color 0.3s;
+  }
+  html.dark .switch::after { background: #F3F0EB; }
+  .switch.on { background: var(--clay); border-color: var(--clay); }
+  .switch.on::after { transform: translateX(18px); }
+  html.dark .switch.on::after { background: #1A0F0A; }
+
+  /* Dock */
+  .dock {
+    position: fixed;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    max-width: 408px;
+    padding: 6px;
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid rgba(255,255,255,0.72);
+    border-radius: var(--r-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 28px rgba(60,44,32,0.10);
+    display: flex;
+    z-index: 30;
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft),
+                box-shadow var(--theme-dur) var(--ease-soft);
+  }
+  html.dark .dock {
+    background: rgba(24, 32, 27, 0.78);
+    border-color: rgba(255,255,255,0.045);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 28px rgba(0,0,0,0.55);
+  }
+  .dock-pill {
+    position: absolute;
+    top: 6px; bottom: 6px; left: 0;
+    background: var(--clay-soft);
+    border-radius: var(--r-pill);
+    transition: transform 0.45s var(--ease-spring), width 0.45s var(--ease-spring), background-color var(--theme-dur);
+    z-index: 0; pointer-events: none;
+  }
+  .dock-item {
+    position: relative; z-index: 1;
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 2px;
+    padding: 8px 4px 6px;
+    border-radius: var(--r-pill);
+    color: var(--ink-3);
+    transition: color 0.3s var(--ease-soft), transform 0.2s var(--ease-spring);
+  }
+  .dock-item:active { transform: scale(0.94); }
+  .dock-item.active { color: var(--clay-2); }
+  html.dark .dock-item.active { color: var(--clay); }
+  .dock-icon { width: 20px; height: 20px; display: block; transition: transform 0.35s var(--ease-spring); }
+  .dock-item.active .dock-icon { transform: scale(1.08) translateY(-1px); }
+  .dock-label { font-size: 10px; font-weight: 500; letter-spacing: 0.02em; }
+
+  /* FAB */
+  .fab {
+    position: fixed;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 72px);
+    left: 50%;
+    transform: translateX(-50%) translateY(0);
+    background: var(--ink); color: #F6F0E8;
+    border-radius: var(--r-pill);
+    padding: 13px 22px;
+    font-size: 13.5px; font-weight: 500;
+    display: flex; align-items: center; gap: 9px;
+    box-shadow: 0 6px 20px rgba(42,35,30,0.24);
+    z-index: 25;
+    transition: transform 0.4s var(--ease-spring), opacity 0.3s var(--ease-soft),
+                background-color var(--theme-dur), color var(--theme-dur), box-shadow var(--theme-dur);
+    white-space: nowrap;
+  }
+  .fab:active { transform: translateX(-50%) scale(0.95); }
+  .fab.hidden {
+    opacity: 0; pointer-events: none;
+    transform: translateX(-50%) translateY(16px) scale(0.9);
+  }
+  html.dark .fab {
+    background: var(--clay); color: #1A0F0A;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  }
+  .fab-count {
+    display: inline-grid; place-items: center;
+    min-width: 22px; height: 22px;
+    padding: 0 7px; border-radius: 999px;
+    background: var(--clay); color: #FFF;
+    font-size: 11.5px; font-weight: 600;
+  }
+  html.dark .fab-count { background: rgba(26,15,10,0.75); color: var(--clay-2); }
+  .fab-size { opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+  /* Dialogs */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(42,35,30,0.32);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex; align-items: flex-end; justify-content: center;
+    z-index: 100;
+    animation: overlayIn 0.3s var(--ease-out);
+  }
+  html.dark .overlay { background: rgba(0,0,0,0.7); }
+  @media (min-width: 520px) { .overlay { align-items: center; padding: 24px; } }
+  @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+  .overlay.hidden { display: none; }
+
+  .sheet {
+    background: var(--surface);
+    width: 100%; max-width: 460px;
+    border-radius: 28px 28px 0 0;
+    padding: 28px 24px max(28px, env(safe-area-inset-bottom));
+    max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 -12px 48px rgba(42,35,30,0.16);
+    animation: sheetIn 0.4s var(--ease-out);
+    scrollbar-width: none;
+    transition: background-color var(--theme-dur), box-shadow var(--theme-dur);
+  }
+  html.dark .sheet {
+    box-shadow: 0 -12px 48px rgba(0,0,0,0.7);
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+  .sheet::-webkit-scrollbar { display: none; }
+  @media (min-width: 520px) {
+    .sheet { border-radius: 28px; padding: 28px 26px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); max-height: 84vh; }
+  }
+  @keyframes sheetIn {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .sheet-grip {
+    width: 36px; height: 4px; border-radius: 2px;
+    background: var(--line);
+    margin: -12px auto 20px;
+  }
+  @media (min-width: 520px) { .sheet-grip { display: none; } }
+
+  .sheet h2 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 24px; font-weight: 500;
+    letter-spacing: -0.02em; line-height: 1.2;
+    margin-bottom: 8px;
+  }
+  .sheet-sub {
+    font-size: 13.5px; color: var(--ink-2);
+    line-height: 1.55; margin-bottom: 20px;
+  }
+  .sheet-body {
+    font-size: 13.5px; color: var(--ink-2);
+    line-height: 1.6; margin-bottom: 20px;
+  }
+  .sheet-actions {
+    display: flex; gap: 10px; justify-content: flex-end;
+    margin-top: 20px; flex-wrap: wrap;
+  }
+  .sheet-actions .btn { flex: none; }
+  .sheet-actions .btn-primary, .sheet-actions .btn-clay { flex: 1; }
+
+  .evidence {
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+    overflow: hidden; margin-bottom: 8px;
+  }
+  .evidence-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line-2);
+    font-size: 12px;
+  }
+  .evidence-item:last-child { border-bottom: none; }
+  .evidence-path {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    word-break: break-all; line-height: 1.45; font-weight: 500;
+  }
+  .evidence-meta {
+    font-size: 11.5px; color: var(--ink-2);
+    margin-top: 4px; line-height: 1.5;
+  }
+  .evidence-meta strong { color: var(--ink); font-weight: 500; }
+
+  .warn-banner {
+    display: flex; gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--r-md);
+    background: var(--brick-soft);
+    color: #7A2818;
+    font-size: 12.5px; line-height: 1.5;
+    margin-bottom: 14px;
+    border: 1px solid rgba(184,69,47,0.15);
+  }
+  html.dark .warn-banner { color: #F0A092; }
+  .warn-banner::before { content: '⚠'; font-size: 14px; flex-shrink: 0; line-height: 1.3; }
+
+  .progress-track {
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 3px;
+    overflow: hidden; margin-bottom: 14px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--clay), #E08A5C);
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.5s var(--ease-out);
+  }
+  html.dark .progress-fill {
+    background: linear-gradient(90deg, var(--clay), var(--clay-2));
+  }
+  .progress-label {
+    font-size: 13.5px; color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .report-big {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 40px; font-weight: 400;
+    letter-spacing: -0.03em;
+    color: var(--clay); line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 76px);
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--ink); color: #F6F0E8;
+    padding: 12px 20px;
+    border-radius: var(--r-pill);
+    font-size: 13px; font-weight: 500;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s var(--ease-soft), transform 0.35s var(--ease-spring),
+                background-color var(--theme-dur), color var(--theme-dur);
+    z-index: 200;
+    box-shadow: 0 8px 24px rgba(42,35,30,0.24);
+    max-width: calc(100% - 40px);
+    text-align: center;
+  }
+  html.dark .toast {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <main class="content" id="content">
+    <div class="content-inner">
+      <!-- ═══ Clean ═══ -->
+      <section class="screen active" id="screen-clean">
+        <div class="hero reveal" style="--i:0">
+          <div class="ring">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="43" fill="none" stroke="var(--surface-3)" stroke-width="7"/>
+              <circle cx="50" cy="50" r="43" fill="none" stroke="var(--clay)" stroke-width="7"
+                stroke-linecap="round" id="heroRing"
+                stroke-dasharray="270.18" stroke-dashoffset="270.18"/>
+            </svg>
+            <div class="pct" id="heroPct">0%</div>
+          </div>
+          <div class="hero-info">
+            <div class="hero-eyebrow">Available</div>
+            <div class="hero-number" id="heroFree">12.4 GB</div>
+            <div class="hero-label" id="heroTotal">free of 64 GB</div>
+          </div>
+        </div>
+
+        <div class="info-card reveal" style="--i:1">
+          <div class="info-head">
+            <div class="info-glyph">◐</div>
+            <div class="info-title">Allow access to files</div>
+          </div>
+          <p class="info-body">CleanForge needs All-files access to list and delete things in shared storage. It only deletes items you select and confirm — and the app has no internet permission.</p>
+          <div class="info-actions">
+            <button class="btn btn-soft btn-sm" onclick="openAllFilesSettings()">Open settings</button>
+          </div>
+        </div>
+
+        <div class="info-card reveal" style="--i:2">
+          <div class="info-head">
+            <div class="info-glyph sage">✦</div>
+            <div class="info-title">Shizuku is optional</div>
+          </div>
+          <p class="info-body">Without it, Android 11+ hides other apps' cache folders (Android/data), so those cleaners stay off. Everything else works. Install and start Shizuku, then come back.</p>
+          <div class="info-actions">
+            <button class="btn btn-outline btn-sm" onclick="checkShizuku()">Check again</button>
+          </div>
+        </div>
+
+        <div class="scan-block reveal" style="--i:3">
+          <p class="scan-hint">Looks at app caches, thumbnails, abandoned downloads, installers and leftovers of uninstalled apps. Nothing is deleted until you review and confirm.</p>
+          <div class="scan-actions">
+            <button class="btn btn-primary" id="scanBtn" onclick="startScan('quick')">
+              <span id="scanBtnLabel">Run scan</span>
+              <span class="dots" id="scanDots" style="display:none"><span>·</span><span>·</span><span>·</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div id="cleanNotices"></div>
+        <div id="cleanResults"></div>
+      </section>
+
+      <!-- ═══ Review ═══ -->
+      <section class="screen" id="screen-review">
+        <div class="info-card reveal" style="--i:0">
+          <div class="info-head">
+            <div class="info-glyph">◐</div>
+            <div class="info-title">Nothing is pre-selected</div>
+          </div>
+          <p class="info-body last">These tools only suggest things for <em>you</em> to look at. Large, old or duplicated files are often exactly what you want to keep — so none of them are ticked for you.</p>
+        </div>
+
+        <div class="scan-block reveal" style="--i:1">
+          <p class="scan-hint">Duplicate detection reads file contents on this phone — nothing is uploaded — and can take a few minutes on a lot of photos or videos.</p>
+          <div class="scan-actions">
+            <button class="btn btn-clay" id="reviewScanBtn" onclick="startScan('ondemand')">
+              <span id="reviewBtnLabel">Find large files &amp; duplicates</span>
+              <span class="dots" id="reviewDots" style="display:none"><span>·</span><span>·</span><span>·</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div id="reviewNotices"></div>
+        <div id="reviewResults"></div>
+      </section>
+
+      <!-- ═══ Memory ═══ -->
+      <section class="screen" id="screen-ram">
+        <div class="ram-wrap">
+          <div class="ram-gauge">
+            <svg viewBox="0 0 180 180">
+              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--surface-3)" stroke-width="10"/>
+              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--clay)" stroke-width="10"
+                stroke-linecap="round" id="ramRing"
+                stroke-dasharray="490.09" stroke-dashoffset="490.09"/>
+            </svg>
+            <div class="ram-center">
+              <div class="ram-pct" id="ramPct">0%</div>
+              <div class="ram-pressure" id="ramPressure">—</div>
+            </div>
+          </div>
+
+          <div class="ram-stats">
+            <div class="ram-used" id="ramUsed">— used</div>
+            <div class="ram-avail" id="ramAvail">— available</div>
+          </div>
+
+          <button class="btn btn-primary" id="clearRamBtn" onclick="clearRam()">Clear background apps</button>
+          <div class="ram-result" id="ramResult"></div>
+        </div>
+
+        <div class="ram-note">
+          <strong>Honest memory info.</strong> CleanForge reads <code>/proc/meminfo</code> directly — no fake "boost" claims. Clearing background apps may free some RAM, but Android will reload them when needed, which uses more battery. The number above is the actual freed bytes, never an estimate.
+        </div>
+      </section>
+
+      <!-- ═══ About ═══ -->
+      <section class="screen" id="screen-about">
+        <div class="about-hero reveal" style="--i:0" id="forgeCard">
+          <div class="about-glyph">🧹</div>
+          <div>
+            <div class="about-name">CleanForge</div>
+            <div class="about-by">Made by Aman</div>
+            <div class="about-meta">v1.0.0 · © 2026 · free &amp; open source</div>
+          </div>
+        </div>
+
+        <div class="card reveal" style="--i:1">
+          <div class="fact">
+            <div class="fact-glyph sage">◉</div>
+            <div>
+              <div class="fact-title">No internet, no tracking</div>
+              <div class="fact-body">CleanForge does not declare the INTERNET permission. No ads, no analytics, no accounts. Your files never leave your phone.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph">✓</div>
+            <div>
+              <div class="fact-title">Evidence-based cleaning</div>
+              <div class="fact-body">Every item flagged carries proof of why it's safe to delete. Filename or extension alone is never accepted as evidence. You review and confirm everything.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph brick">⛨</div>
+            <div>
+              <div class="fact-title">Safety first</div>
+              <div class="fact-body">Fingerprint verification, symlink protection, mount boundaries, and depth limits. No shell commands, no recursive deletion. Personal data zones are never pre-selected.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph amber">✦</div>
+            <div>
+              <div class="fact-title">Shizuku integration (optional)</div>
+              <div class="fact-body">On Android 11+, Android/data and Android/obb are invisible to normal apps. Shizuku (user-service, not root) lets CleanForge read and clear those caches. Without it, those scanners are skipped with a visible notice.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph">◐</div>
+            <div>
+              <div class="fact-title">Honest RAM monitoring</div>
+              <div class="fact-body">Reads /proc/meminfo directly. Shows total, used, available, and cached memory with a colour-coded pressure indicator. No fake "boost" claims.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card reveal" style="--i:2">
+          <div class="settings-row">
+            <div class="settings-text">
+              <div class="settings-title">Dark mode</div>
+              <div class="settings-desc">Muted emerald on a calm neutral night.</div>
+            </div>
+            <div class="switch" id="darkSwitch" role="switch" aria-checked="false" onclick="toggleDark()"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Welcome verse — fixed behind content -->
+  <div class="welcome-host" id="welcomeVerseHost"></div>
+
+  <!-- Topbar — absolute overlay; cards scroll under it -->
+  <header class="topbar" id="topbar">
+    <h1 class="topbar-title" id="topTitle"></h1>
+    <p class="topbar-sub" id="topSub">a quieter way to tidy up</p>
+  </header>
+
+  <!-- FAB -->
+  <button class="fab hidden" id="fab" onclick="requestClean()">
+    <span>Review</span>
+    <span class="fab-count" id="fabCount">0</span>
+    <span class="fab-size" id="fabSize">0 B</span>
+  </button>
+
+  <!-- Dock -->
+  <nav class="dock" id="dock">
+    <div class="dock-pill" id="dockPill"></div>
+    <button class="dock-item active" data-screen="clean" onclick="navigate('clean')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3l1.5 4.5L15 9l-4.5 1.5L9 15l-1.5-4.5L3 9l4.5-1.5z"/>
+        <path d="M17 14l.8 2.2L20 17l-2.2.8L17 20l-.8-2.2L14 17l2.2-.8z"/>
+      </svg>
+      <span class="dock-label">Clean</span>
+    </button>
+    <button class="dock-item" data-screen="review" onclick="navigate('review')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12l5 5L20 6"/>
+      </svg>
+      <span class="dock-label">Review</span>
+    </button>
+    <button class="dock-item" data-screen="ram" onclick="navigate('ram')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="6" width="12" height="12" rx="2"/>
+        <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
+      </svg>
+      <span class="dock-label">Memory</span>
+    </button>
+    <button class="dock-item" data-screen="about" onclick="navigate('about')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 11v5M12 8h.01"/>
+      </svg>
+      <span class="dock-label">About</span>
+    </button>
+  </nav>
+
+  <!-- Dialogs -->
+  <div class="overlay hidden" id="confirmDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2 id="confirmTitle">Delete 0 items?</h2>
+      <p class="sheet-sub" id="confirmSub"></p>
+      <div id="confirmWarn"></div>
+      <div class="evidence" id="confirmEvidence"></div>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost" onclick="closeDialog('confirmDialog')">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmDelete()">Delete permanently</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="progressDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2 id="progressTitle">Cleaning…</h2>
+      <p class="sheet-sub">Please keep the app open.</p>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-label" id="progressLabel">0 of 0 · freed 0 B</div>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost" onclick="stopCleaning()">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="reportDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2 id="reportTitle">All done</h2>
+      <div id="reportBody"></div>
+      <div class="sheet-actions">
+        <button class="btn btn-primary" onclick="closeDialog('reportDialog')">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="easterEggDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2>Are you sure?</h2>
+      <p class="sheet-sub">Seven taps on the forge. That's either curiosity or destiny — and I'm not here to judge. Ready to flip the verses?</p>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost" onclick="closeDialog('easterEggDialog')">Not yet</button>
+        <button class="btn btn-primary" onclick="confirmEasterEgg()">Flip it</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const ANCHOR_VERSE = {
+  text: 'For God so loved the world, that he gave his one and only Son, that whoever believes in him should not perish, but have eternal life.',
+  ref: 'John 3:16',
+};
+
+const PREF_KEY = 'cleanforge.prefs';
+const prefs = Object.assign(
+  { verses: true, dark: false },
+  JSON.parse(localStorage.getItem(PREF_KEY) || '{}')
+);
+function savePrefs() { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); }
+
+function applyTheme(animate) {
+  if (animate) {
+    document.documentElement.classList.add('theme-switching');
+    setTimeout(() => document.documentElement.classList.remove('theme-switching'), 400);
+  }
+  document.documentElement.classList.toggle('dark', !!prefs.dark);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', prefs.dark ? '#101014' : '#F4EFE8');
+}
+
+function toggleDark() {
+  prefs.dark = !prefs.dark;
+  savePrefs();
+  applyTheme(true);
+  syncToggleUI();
+  haptic(prefs.dark ? 'success' : 'light');
+  toast(prefs.dark ? 'Dark mode on' : 'Light mode on');
+}
+
+function haptic(pattern) {
+  if (!('vibrate' in navigator)) return;
+  const P = {
+    light: 8, medium: 14, heavy: 24, tick: 5,
+    success: [10, 40, 18], warn: [16, 55, 16], error: [26, 45, 26, 45, 26],
+  };
+  try { navigator.vibrate(P[pattern] || P.light); } catch (_) {}
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+const state = {
+  currentScreen: 'clean',
+  scanning: false,
+  scanned: false,
+  items: [],
+  selected: new Set(),
+  notices: [],
+  freeBytes: 12_400_000_000,
+  totalBytes: 64_000_000_000,
+  ramUsed: 3_200_000_000,
+  ramTotal: 6_000_000_000,
+  ramAvailable: 2_800_000_000,
+};
+
+const QUICK_ITEMS = [
+  { category: 'App caches', displayName: 'WhatsApp cache', path: '/storage/emulated/0/Android/data/com.whatsapp/cache', reason: 'Package installed + exact path match', sizeBytes: 245_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'REVERSIBLE', requiresShizuku: true },
+  { category: 'App caches', displayName: 'Instagram cache', path: '/storage/emulated/0/Android/data/com.instagram.android/cache', reason: 'Package installed + exact path match', sizeBytes: 180_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'REVERSIBLE', requiresShizuku: true },
+  { category: 'Leftovers', displayName: 'com.oldgame.app', path: '/storage/emulated/0/Android/data/com.oldgame.app', reason: 'Package unknown to OS + age ≥ 14 days', sizeBytes: 520_000_000, risk: 'SAFE', confidence: 'MEDIUM', reversibility: 'NOT_REVERSIBLE', requiresShizuku: true },
+  { category: 'Thumbnails', displayName: '.thumbnails', path: '/storage/emulated/0/DCIM/.thumbnails', reason: 'Only small files, no sub-folders', sizeBytes: 45_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'REVERSIBLE', requiresShizuku: false },
+  { category: 'Incomplete downloads', displayName: 'video.mp4.crdownload', path: '/storage/emulated/0/Download/video.mp4.crdownload', reason: 'Age ≥ 7 days + Download folder only', sizeBytes: 1_200_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Log files', displayName: 'app.log', path: '/storage/emulated/0/Download/app.log', reason: 'Text content verified + age ≥ 30 days', sizeBytes: 12_000_000, risk: 'SAFE', confidence: 'MEDIUM', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'APK installers', displayName: 'old_app.apk', path: '/storage/emulated/0/Download/old_app.apk', reason: 'Platform parser reads manifest', sizeBytes: 85_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Empty folders', displayName: 'empty_folder', path: '/storage/emulated/0/Download/empty_folder', reason: 'Verifiably empty directory', sizeBytes: 0, risk: 'SAFE', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+];
+
+const ONDEMAND_ITEMS = [
+  { category: 'Large files', displayName: 'movie.mp4', path: '/storage/emulated/0/Movies/movie.mp4', reason: 'File over threshold (2.1 GB)', sizeBytes: 2_100_000_000, risk: 'ELEVATED', confidence: 'LOW', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Duplicates', displayName: 'IMG_20240101_copy.jpg', path: '/storage/emulated/0/DCIM/Camera/IMG_20240101_copy.jpg', reason: 'Same content as IMG_20240101.jpg', sizeBytes: 4_500_000, risk: 'ELEVATED', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Large files', displayName: 'backup.zip', path: '/storage/emulated/0/Download/backup.zip', reason: 'File over threshold (1.8 GB)', sizeBytes: 1_800_000_000, risk: 'ELEVATED', confidence: 'LOW', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+];
+
+function fmt(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024, sizes = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+function esc(s) { return String(s).replace(/'/g, "\\'"); }
+
+/* ─────────────────────────────────────────────
+   Per-letter counter heading animation
+   ───────────────────────────────────────────── */
+function renderTitle(text) {
+  const el = document.getElementById('topTitle');
+  if (!el) return;
+  el.innerHTML = '';
+  [...text].forEach((ch, i) => {
+    const s = document.createElement('span');
+    s.className = 'title-letter';
+    s.textContent = ch === ' ' ? '\u00A0' : ch;
+    s.style.animationDelay = (i * 26) + 'ms';
+    el.appendChild(s);
+  });
+}
+
+const TITLES = {
+  clean:  { title: 'CleanForge', sub: 'a quieter way to tidy up' },
+  review: { title: 'Review',     sub: 'you decide what stays' },
+  ram:    { title: 'Memory',     sub: 'honest, no boost claims' },
+  about:  { title: 'About',      sub: 'open, private, honest' },
+};
+
+function navigate(screen) {
+  if (screen === state.currentScreen) return;
+  state.currentScreen = screen;
+  haptic('light');
+
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + screen);
+  void el.offsetWidth;
+  el.classList.add('active');
+
+  document.querySelectorAll('.dock-item').forEach(n =>
+    n.classList.toggle('active', n.dataset.screen === screen)
+  );
+
+  renderTitle(TITLES[screen].title);
+  document.getElementById('topSub').textContent = TITLES[screen].sub;
+
+  const content = document.getElementById('content');
+  content.scrollTop = 0;
+  document.getElementById('topbar').classList.remove('scrolled');
+  updateVerseScrollFade();
+
+  updateDockPill();
+  updateFab();
+}
+
+function updateDockPill() {
+  const active = document.querySelector('.dock-item.active');
+  const pill = document.getElementById('dockPill');
+  const dock = document.getElementById('dock');
+  if (!active || !pill || !dock) return;
+  const dRect = dock.getBoundingClientRect();
+  const aRect = active.getBoundingClientRect();
+  pill.style.width = aRect.width + 'px';
+  pill.style.transform = 'translateX(' + (aRect.left - dRect.left) + 'px)';
+}
+
+/* ─────────────────────────────────────────────
+   Verse
+   ───────────────────────────────────────────── */
+function verseHTML(verse) {
+  return '<div class="verse-welcome">' +
+    '<div class="verse-text">' + verse.text + '</div>' +
+    '<div class="verse-ref">' + verse.ref + '</div>' +
+  '</div>';
+}
+function playVerses(container) {
+  requestAnimationFrame(() => {
+    container.querySelectorAll('.verse-welcome').forEach(v => v.classList.add('show'));
+  });
+}
+function renderWelcomeVerse() {
+  const host = document.getElementById('welcomeVerseHost');
+  if (!host) return;
+  if (!prefs.verses) {
+    host.innerHTML = '';
+    document.body.classList.remove('verses-on');
+    return;
+  }
+  host.innerHTML = verseHTML(ANCHOR_VERSE);
+  document.body.classList.add('verses-on');
+  playVerses(host);
+}
+
+/* Verse fades as it scrolls up toward the topbar */
+function updateVerseScrollFade() {
+  const host = document.getElementById('welcomeVerseHost');
+  const content = document.getElementById('content');
+  if (!host || !content) return;
+  const y = content.scrollTop;
+  const o = Math.max(0, 1 - y / 140);
+  host.style.opacity = o;
+}
+
+/* ─────────────────────────────────────────────
+   Scan
+   ───────────────────────────────────────────── */
+function startScan(mode) {
+  if (state.scanning) return;
+  state.scanning = true;
+  state.scanned = false;
+  state.notices = [];
+  state.items = [];
+  state.selected.clear();
+  haptic('medium');
+
+  const label = document.getElementById(mode === 'quick' ? 'scanBtnLabel' : 'reviewBtnLabel');
+  const dots  = document.getElementById(mode === 'quick' ? 'scanDots'    : 'reviewDots');
+  const btn   = document.getElementById(mode === 'quick' ? 'scanBtn'     : 'reviewScanBtn');
+  const originalLabel = label.textContent;
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = 'Scanning';
+  if (dots)  dots.style.display = 'inline';
+
+  updateResults();
+
+  let p = 0;
+  const t = setInterval(() => {
+    p += 8 + Math.random() * 14;
+    if (p >= 100) {
+      clearInterval(t);
+      state.scanning = false;
+      state.scanned = true;
+      state.items = mode === 'quick' ? QUICK_ITEMS.slice() : ONDEMAND_ITEMS.slice();
+      state.notices = mode === 'quick'
+        ? ['Shizuku is not running — Android/data and Android/obb were skipped.']
+        : [];
+      if (btn) btn.disabled = false;
+      if (label) label.textContent = originalLabel;
+      if (dots)  dots.style.display = 'none';
+      haptic('success');
+      updateResults();
+      updateFab();
+    }
+  }, 180);
+}
+
+function updateResults() {
+  const quick = state.items.filter(i => i.category !== 'Large files' && i.category !== 'Duplicates');
+  const onDemand = state.items.filter(i => i.category === 'Large files' || i.category === 'Duplicates');
+  renderNotices('cleanNotices', state.notices);
+  renderNotices('reviewNotices', []);
+  renderResults('cleanResults', quick);
+  renderResults('reviewResults', onDemand);
+}
+
+function renderNotices(id, notices) {
+  const el = document.getElementById(id);
+  if (!notices || !notices.length) { el.innerHTML = ''; return; }
+  el.innerHTML = notices.map(n => '<div class="notice">' + n + '</div>').join('');
+}
+
+function renderResults(id, items) {
+  const el = document.getElementById(id);
+  if (state.scanning) {
+    el.innerHTML = '<div class="empty"><span class="empty-glyph">✦</span>Scanning…</div>';
+    return;
+  }
+  if (!state.scanned) {
+    el.innerHTML = '<div class="empty"><span class="empty-glyph">◐</span>Nothing scanned yet. Run a scan to see what could be removed — you decide what goes.</div>';
+    return;
+  }
+  if (!items.length) {
+    el.innerHTML = '<div class="empty"><span class="empty-glyph">✓</span>Nothing found here.</div>';
+    return;
+  }
+  const groups = {};
+  items.forEach(i => { (groups[i.category] = groups[i.category] || []).push(i); });
+
+  let html = '';
+  for (const cat of Object.keys(groups)) {
+    const list = groups[cat];
+    const total = list.reduce((s, i) => s + i.sizeBytes, 0);
+    html += '<div class="section-head">' +
+      '<span class="section-title">' + cat + '</span>' +
+      '<span class="section-meta">' + list.length + ' · ' + fmt(total) + '</span>' +
+    '</div>';
+    list.forEach(item => {
+      const on = state.selected.has(item.path);
+      const riskCls = item.risk === 'SAFE' ? 'tag-safe' : item.risk === 'ELEVATED' ? 'tag-check' : 'tag-danger';
+      const riskLbl = item.risk === 'SAFE' ? 'Low risk' : item.risk === 'ELEVATED' ? 'Check first' : 'May be personal';
+      const confLbl = item.confidence === 'HIGH' ? 'Strong evidence' : item.confidence === 'MEDIUM' ? 'Some evidence' : 'Weak evidence';
+      html += '<div class="item ' + (on ? 'selected' : '') + '" onclick="toggleItem(\'' + esc(item.path) + '\')">' +
+        '<div class="check"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>' +
+        '<div class="item-body">' +
+          '<div class="item-name">' + item.displayName + '</div>' +
+          '<div class="item-reason">' + item.reason + '</div>' +
+          '<div class="item-path">' + item.path + '</div>' +
+          '<div class="item-tags">' +
+            '<span class="tag ' + riskCls + '">' + riskLbl + '</span>' +
+            '<span class="tag tag-neutral">' + confLbl + '</span>' +
+            (item.reversibility === 'NOT_REVERSIBLE' ? '<span class="tag tag-neutral">No undo</span>' : '') +
+            (item.requiresShizuku ? '<span class="tag tag-neutral">Shizuku</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="item-size">' + fmt(item.sizeBytes) + '</div>' +
+      '</div>';
+    });
+  }
+  el.innerHTML = html;
+}
+
+function toggleItem(path) {
+  if (state.selected.has(path)) {
+    state.selected.delete(path);
+    haptic('tick');
+  } else {
+    state.selected.add(path);
+    haptic('light');
+  }
+  updateResults();
+  updateFab();
+}
+
+function updateFab() {
+  const fab = document.getElementById('fab');
+  const onAction = state.currentScreen === 'clean' || state.currentScreen === 'review';
+  if (onAction && state.selected.size > 0 && !state.scanning) {
+    fab.classList.remove('hidden');
+    const bytes = state.items
+      .filter(i => state.selected.has(i.path))
+      .reduce((s, i) => s + i.sizeBytes, 0);
+    document.getElementById('fabCount').textContent = state.selected.size;
+    document.getElementById('fabSize').textContent = fmt(bytes);
+  } else {
+    fab.classList.add('hidden');
+  }
+}
+
+function requestClean() {
+  const items = state.items.filter(i => state.selected.has(i.path));
+  if (!items.length) return;
+  haptic('medium');
+  const total = items.reduce((s, i) => s + i.sizeBytes, 0);
+  document.getElementById('confirmTitle').textContent = 'Delete ' + items.length + ' item' + (items.length > 1 ? 's' : '') + '?';
+  document.getElementById('confirmSub').innerHTML =
+    'Frees about <strong style="color:var(--ink)">' + fmt(total) + '</strong> — file sizes, not disk blocks.';
+
+  let warnHtml = '';
+  if (items.some(i => i.reversibility === 'NOT_REVERSIBLE')) {
+    warnHtml += '<div class="warn-banner">Deleted for good — CleanForge has no recycle bin.</div>';
+  }
+  if (items.some(i => i.risk !== 'SAFE')) {
+    warnHtml += '<div class="warn-banner">Some items aren\'t plain caches and may be personal. Check every path below before confirming.</div>';
+  }
+  document.getElementById('confirmWarn').innerHTML = warnHtml;
+  document.getElementById('confirmEvidence').innerHTML = items.map(i =>
+    '<div class="evidence-item">' +
+      '<div class="evidence-path">' + i.path + '</div>' +
+      '<div class="evidence-meta"><strong>' + i.category + '</strong> · ' + fmt(i.sizeBytes) + '</div>' +
+      '<div class="evidence-meta">Why flagged: ' + i.reason + '</div>' +
+      '<div class="evidence-meta">Confidence: ' + i.confidence + ' · Risk: ' + i.risk + (i.requiresShizuku ? ' · via Shizuku' : '') + '</div>' +
+    '</div>'
+  ).join('');
+  document.getElementById('confirmDialog').classList.remove('hidden');
+}
+
+function confirmDelete() {
+  haptic('heavy');
+  closeDialog('confirmDialog');
+  showProgress();
+}
+
+function showProgress() {
+  const items = state.items.filter(i => state.selected.has(i.path));
+  const total = items.length;
+  const totalBytes = items.reduce((s, i) => s + i.sizeBytes, 0);
+  let done = 0;
+  document.getElementById('progressDialog').classList.remove('hidden');
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressLabel').textContent = '0 of ' + total + ' · freed 0 B';
+  const t = setInterval(() => {
+    done++;
+    const pct = (done / total) * 100;
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent =
+      done + ' of ' + total + ' · freed ' + fmt(totalBytes * (done / total));
+    haptic('tick');
+    if (done >= total) {
+      clearInterval(t);
+      setTimeout(() => { closeDialog('progressDialog'); showReport(totalBytes); }, 420);
+    }
+  }, 620);
+  state._progressTimer = t;
+}
+
+function stopCleaning() {
+  clearInterval(state._progressTimer);
+  haptic('warn');
+  closeDialog('progressDialog');
+  showReport(0);
+}
+
+function showReport(freed) {
+  haptic(freed > 0 ? 'success' : 'warn');
+  document.getElementById('reportTitle').textContent = freed > 0 ? 'All done' : 'Stopped';
+  let html;
+  if (freed > 0) {
+    html = '<div class="report-big">' + fmt(freed) + '</div>' +
+      '<p class="sheet-body">Everything you confirmed has been removed. Anything already removed stays removed.</p>';
+  } else {
+    html = '<p class="sheet-body">Nothing was deleted. Your files are exactly where you left them.</p>';
+  }
+  document.getElementById('reportBody').innerHTML = html;
+  document.getElementById('reportDialog').classList.remove('hidden');
+  state.selected.clear();
+  state.items = [];
+  state.scanned = false;
+  updateResults();
+  updateFab();
+}
+
+function closeDialog(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+function updateRam() {
+  const frac = Math.min(1, state.ramUsed / state.ramTotal);
+  document.getElementById('ramPct').textContent = Math.round(frac * 100) + '%';
+  document.getElementById('ramUsed').textContent = fmt(state.ramUsed) + ' used of ' + fmt(state.ramTotal);
+  document.getElementById('ramAvail').textContent = fmt(state.ramAvailable) + ' available';
+  const C = 2 * Math.PI * 78;
+  const ring = document.getElementById('ramRing');
+  ring.setAttribute('stroke-dasharray', C);
+  ring.setAttribute('stroke-dashoffset', C * (1 - frac));
+  let pressure = 'Low', color = 'var(--sage)';
+  if (frac > 0.85) { pressure = 'Critical'; color = 'var(--brick)'; }
+  else if (frac > 0.7) { pressure = 'High'; color = 'var(--clay)'; }
+  else if (frac > 0.5) { pressure = 'Moderate'; color = 'var(--amber)'; }
+  document.getElementById('ramPressure').textContent = pressure;
+  ring.setAttribute('stroke', color);
+}
+
+function clearRam() {
+  const btn = document.getElementById('clearRamBtn');
+  btn.disabled = true;
+  btn.textContent = 'Clearing…';
+  haptic('medium');
+  setTimeout(() => {
+    const freed = 400_000_000 + Math.random() * 320_000_000;
+    state.ramUsed = Math.max(1_000_000_000, state.ramUsed - freed);
+    state.ramAvailable = state.ramTotal - state.ramUsed;
+    updateRam();
+    document.getElementById('ramResult').textContent =
+      'Freed ' + fmt(freed) + '. Android may reload apps, using more battery.';
+    btn.disabled = false;
+    btn.textContent = 'Clear background apps';
+    haptic('success');
+  }, 1500);
+}
+
+function updateHero() {
+  const frac = (state.totalBytes - state.freeBytes) / state.totalBytes;
+  document.getElementById('heroPct').textContent = Math.round(frac * 100) + '%';
+  document.getElementById('heroFree').textContent = fmt(state.freeBytes);
+  document.getElementById('heroTotal').textContent = 'free of ' + fmt(state.totalBytes);
+  const C = 2 * Math.PI * 43;
+  const ring = document.getElementById('heroRing');
+  ring.setAttribute('stroke-dasharray', C);
+  requestAnimationFrame(() => {
+    ring.setAttribute('stroke-dashoffset', C * (1 - frac));
+  });
+}
+
+function syncToggleUI() {
+  const ds = document.getElementById('darkSwitch');
+  if (ds) {
+    ds.classList.toggle('on', prefs.dark);
+    ds.setAttribute('aria-checked', String(prefs.dark));
+  }
+}
+
+/* Easter egg — 7 taps on forge card toggles verses */
+let forgeTaps = 0;
+let forgeTimer = null;
+document.getElementById('forgeCard').addEventListener('click', () => {
+  forgeTaps++;
+  haptic('tick');
+  clearTimeout(forgeTimer);
+  forgeTimer = setTimeout(() => { forgeTaps = 0; }, 1400);
+  if (forgeTaps >= 7) {
+    forgeTaps = 0;
+    haptic('medium');
+    document.getElementById('easterEggDialog').classList.remove('hidden');
+  }
+});
+
+function confirmEasterEgg() {
+  closeDialog('easterEggDialog');
+  prefs.verses = !prefs.verses;
+  savePrefs();
+  renderWelcomeVerse();
+  haptic(prefs.verses ? 'success' : 'warn');
+  toast(prefs.verses ? 'Verses on' : 'Verses off');
+}
+
+function openAllFilesSettings() { haptic('light'); toast('Opening All-files access settings…'); }
+function checkShizuku()          { haptic('light'); toast('Checking Shizuku status…'); }
+
+const contentEl = document.getElementById('content');
+contentEl.addEventListener('scroll', () => {
+  const scrolled = contentEl.scrollTop > 20;
+  document.getElementById('topbar').classList.toggle('scrolled', scrolled);
+  updateVerseScrollFade();
+}, { passive: true });
+
+window.addEventListener('resize', updateDockPill);
+
+applyTheme(false);
+renderTitle(TITLES.clean.title);
+document.getElementById('topSub').textContent = TITLES.clean.sub;
+updateHero();
+updateRam();
+updateResults();
+updateFab();
+syncToggleUI();
+renderWelcomeVerse();
+updateVerseScrollFade();
+
+requestAnimationFrame(() => requestAnimationFrame(updateDockPill));
+window.addEventListener('load', updateDockPill);
+setTimeout(updateDockPill, 200);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    ['confirmDialog','progressDialog','reportDialog','easterEggDialog'].forEach(closeDialog);
+  }
+});
+</script>
+</body>
+</html>

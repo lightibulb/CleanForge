@@ -15,7 +15,7 @@ class StorageWalker(private val fs: FsOps) {
         limits: WalkLimits = WalkLimits(),
         skipDir: (String) -> Boolean = { false },
         onTruncated: () -> Unit = {},
-        /** Called once per directory that exists but could not be listed (its contents are NOT part of the walk). */
+        /** Called once per entry that exists but could not be examined or listed, or that is a mount point (its contents are NOT part of the walk). */
         onUnreadable: () -> Unit = {}
     ): Sequence<Entry> = sequence {
         val rootStat = fs.lstat(root)
@@ -40,8 +40,18 @@ class StorageWalker(private val fs: FsOps) {
                     return@sequence
                 }
                 val path = "$dir/$name"
-                val st = fs.lstat(path) ?: continue
-                if (st.dev != rootStat.dev) continue // mount boundary
+                val st = when (val probe = fs.probe(path)) {
+                    is FsProbe.Found -> probe.stat
+                    FsProbe.Missing -> continue // vanished between list and stat: nothing to count
+                    FsProbe.Denied, FsProbe.Error -> {
+                        onUnreadable() // it exists but cannot be examined: its bytes are unknown, never "zero"
+                        continue
+                    }
+                }
+                if (st.dev != rootStat.dev) { // mount boundary: not entered, so whatever is below it is not counted
+                    onUnreadable()
+                    continue
+                }
                 yield(Entry(path, name, st, depth + 1))
                 if (st.type == FsType.DIRECTORY && !skipDir(path)) {
                     if (depth + 1 < limits.maxDepth) {
