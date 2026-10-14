@@ -14,8 +14,10 @@ import com.cleanforge.core.privileged.UnavailableReason
 import com.cleanforge.shizuku.IFileService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.util.concurrent.atomic.AtomicReference
@@ -53,7 +55,10 @@ class ShizukuFileServiceConnector @Inject constructor(
             .version(BuildConfig.VERSION_CODE)
     }
 
-    override suspend fun acquire(): SessionResult = mutex.withLock {
+    // Shizuku status checks and bind/unbind are binder calls: always off the caller's (possibly main) thread.
+    override suspend fun acquire(): SessionResult = withContext(Dispatchers.IO) { acquireLocked() }
+
+    private suspend fun acquireLocked(): SessionResult = mutex.withLock {
         manager.refresh()
         val blocked = notReadyFor(manager.state.value)
         if (blocked != null) {
@@ -71,7 +76,7 @@ class ShizukuFileServiceConnector @Inject constructor(
     }
 
     override suspend fun restart() {
-        mutex.withLock { dropBinding(removeService = true) }
+        withContext(Dispatchers.IO) { mutex.withLock { dropBinding(removeService = true) } }
     }
 
     // ------------------------------------------------------------------ internals

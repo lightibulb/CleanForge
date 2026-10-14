@@ -74,7 +74,7 @@ class FileServiceCore(
         // B) Implementation limitation: File.list() returned null despite being a dir.
         // Treat as OS_DENIED or FAILED conservatively.
         if (names == null) {
-            return ListReply(ReplyStatus.OS_DENIED, detail = "Could not list contents of existing directory")
+            return ListReply(ReplyStatus.OS_DENIED)
         }
 
         val out = ArrayList<String>()

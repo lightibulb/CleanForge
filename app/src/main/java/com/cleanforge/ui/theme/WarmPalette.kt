@@ -71,47 +71,50 @@ val LocalWarmPalette = staticCompositionLocalOf {
 @Composable
 fun ProvideWarmPalette(dark: Boolean, content: @Composable () -> Unit) {
     val t = updateTransition(dark, label = "theme")
+    
+    // Define the spec
     val spec = tween<Color>(durationMillis = 350, easing = FastOutSlowInEasing)
-
+    
     val light = WarmLight
     val darkP = WarmDark
-
+    
     val palette = WarmPalette(
-        bg = t.animateColor(spec, label = "bg") { if (it) darkP.Bg else light.Bg }.value,
-        bg2 = t.animateColor(spec, label = "bg2") { if (it) darkP.Bg2 else light.Bg2 }.value,
-        surface = t.animateColor(spec, label = "surface") { if (it) darkP.Surface else light.Surface }.value,
-        surface2 = t.animateColor(spec, label = "surface2") { if (it) darkP.Surface2 else light.Surface2 }.value,
-        surface3 = t.animateColor(spec, label = "surface3") { if (it) darkP.Surface3 else light.Surface3 }.value,
-        heroSurface = t.animateColor(spec, label = "hero") { if (it) darkP.HeroSurface else light.HeroSurface }.value,
-        aboutSurface = t.animateColor(spec, label = "about") { if (it) darkP.AboutSurface else light.AboutSurface }.value,
-        ink = t.animateColor(spec, label = "ink") { if (it) darkP.Ink else light.Ink }.value,
-        ink2 = t.animateColor(spec, label = "ink2") { if (it) darkP.Ink2 else light.Ink2 }.value,
-        ink3 = t.animateColor(spec, label = "ink3") { if (it) darkP.Ink3 else light.Ink3 }.value,
-        line = t.animateColor(spec, label = "line") { if (it) darkP.Line else light.Line }.value,
-        line2 = t.animateColor(spec, label = "line2") { if (it) darkP.Line2 else light.Line2 }.value,
-        clay = t.animateColor(spec, label = "clay") { if (it) darkP.Clay else light.Clay }.value,
-        clay2 = t.animateColor(spec, label = "clay2") { if (it) darkP.Clay2 else light.Clay2 }.value,
-        claySoft = t.animateColor(spec, label = "claySoft") { if (it) darkP.ClaySoft else light.ClaySoft }.value,
-        clayTint = t.animateColor(spec, label = "clayTint") { if (it) darkP.ClayTint else light.ClayTint }.value,
-        sage = t.animateColor(spec, label = "sage") { if (it) darkP.Sage else light.Sage }.value,
-        sageSoft = t.animateColor(spec, label = "sageSoft") { if (it) darkP.SageSoft else light.SageSoft }.value,
-        amber = t.animateColor(spec, label = "amber") { if (it) darkP.Amber else light.Amber }.value,
-        amberSoft = t.animateColor(spec, label = "amberSoft") { if (it) darkP.AmberSoft else light.AmberSoft }.value,
-        amberDeep = t.animateColor(spec, label = "amberDeep") { if (it) darkP.AmberDeep else light.AmberDeep }.value,
-        brick = t.animateColor(spec, label = "brick") { if (it) darkP.Brick else light.Brick }.value,
-        brickSoft = t.animateColor(spec, label = "brickSoft") { if (it) darkP.BrickSoft else light.BrickSoft }.value,
-        brickDeep = t.animateColor(spec, label = "brickDeep") { if (it) darkP.BrickDeep else light.BrickDeep }.value,
-        tickOnClay = t.animateColor(spec, label = "tick") { if (it) darkP.TickOnClay else light.TickOnClay }.value,
-        dockBg = t.animateColor(spec, label = "dockBg") { if (it) darkP.DockBg else light.DockBg }.value,
-        dockBorder = t.animateColor(spec, label = "dockBorder") { if (it) darkP.DockBorder else light.DockBorder }.value,
-        overlayScrim = t.animateColor(spec, label = "scrim") { if (it) darkP.OverlayScrim else light.OverlayScrim }.value,
-        toastBg = t.animateColor(spec, label = "toastBg") { if (it) darkP.ToastBg else light.ToastBg }.value,
-        toastText = t.animateColor(spec, label = "toastText") { if (it) darkP.ToastText else light.ToastText }.value,
-        fabBg = t.animateColor(spec, label = "fabBg") { if (it) darkP.FabBg else light.FabBg }.value,
-        fabText = t.animateColor(spec, label = "fabText") { if (it) darkP.FabText else light.FabText }.value,
-        fabBadge = t.animateColor(spec, label = "fabBadge") { if (it) darkP.FabBadge else light.FabBadge }.value,
-        fabBadgeText = t.animateColor(spec, label = "fabBadgeText") { if (it) darkP.FabBadgeText else light.FabBadgeText }.value,
+        // FIX: Wrap 'spec' in a lambda { spec } for the transitionSpec parameter
+        bg = t.animateColor(transitionSpec = { spec }, label = "bg") { if (it) darkP.Bg else light.Bg }.value,
+        bg2 = t.animateColor(transitionSpec = { spec }, label = "bg2") { if (it) darkP.Bg2 else light.Bg2 }.value,
+        surface = t.animateColor(transitionSpec = { spec }, label = "surface") { if (it) darkP.Surface else light.Surface }.value,
+        surface2 = t.animateColor(transitionSpec = { spec }, label = "surface2") { if (it) darkP.Surface2 else light.Surface2 }.value,
+        surface3 = t.animateColor(transitionSpec = { spec }, label = "surface3") { if (it) darkP.Surface3 else light.Surface3 }.value,
+        heroSurface = t.animateColor(transitionSpec = { spec }, label = "hero") { if (it) darkP.HeroSurface else light.HeroSurface }.value,
+        aboutSurface = t.animateColor(transitionSpec = { spec }, label = "about") { if (it) darkP.AboutSurface else light.AboutSurface }.value,
+        ink = t.animateColor(transitionSpec = { spec }, label = "ink") { if (it) darkP.Ink else light.Ink }.value,
+        ink2 = t.animateColor(transitionSpec = { spec }, label = "ink2") { if (it) darkP.Ink2 else light.Ink2 }.value,
+        ink3 = t.animateColor(transitionSpec = { spec }, label = "ink3") { if (it) darkP.Ink3 else light.Ink3 }.value,
+        line = t.animateColor(transitionSpec = { spec }, label = "line") { if (it) darkP.Line else light.Line }.value,
+        line2 = t.animateColor(transitionSpec = { spec }, label = "line2") { if (it) darkP.Line2 else light.Line2 }.value,
+        clay = t.animateColor(transitionSpec = { spec }, label = "clay") { if (it) darkP.Clay else light.Clay }.value,
+        clay2 = t.animateColor(transitionSpec = { spec }, label = "clay2") { if (it) darkP.Clay2 else light.Clay2 }.value,
+        claySoft = t.animateColor(transitionSpec = { spec }, label = "claySoft") { if (it) darkP.ClaySoft else light.ClaySoft }.value,
+        clayTint = t.animateColor(transitionSpec = { spec }, label = "clayTint") { if (it) darkP.ClayTint else light.ClayTint }.value,
+        sage = t.animateColor(transitionSpec = { spec }, label = "sage") { if (it) darkP.Sage else light.Sage }.value,
+        sageSoft = t.animateColor(transitionSpec = { spec }, label = "sageSoft") { if (it) darkP.SageSoft else light.SageSoft }.value,
+        amber = t.animateColor(transitionSpec = { spec }, label = "amber") { if (it) darkP.Amber else light.Amber }.value,
+        amberSoft = t.animateColor(transitionSpec = { spec }, label = "amberSoft") { if (it) darkP.AmberSoft else light.AmberSoft }.value,
+        amberDeep = t.animateColor(transitionSpec = { spec }, label = "amberDeep") { if (it) darkP.AmberDeep else light.AmberDeep }.value,
+        brick = t.animateColor(transitionSpec = { spec }, label = "brick") { if (it) darkP.Brick else light.Brick }.value,
+        brickSoft = t.animateColor(transitionSpec = { spec }, label = "brickSoft") { if (it) darkP.BrickSoft else light.BrickSoft }.value,
+        brickDeep = t.animateColor(transitionSpec = { spec }, label = "brickDeep") { if (it) darkP.BrickDeep else light.BrickDeep }.value,
+        tickOnClay = t.animateColor(transitionSpec = { spec }, label = "tick") { if (it) darkP.TickOnClay else light.TickOnClay }.value,
+        dockBg = t.animateColor(transitionSpec = { spec }, label = "dockBg") { if (it) darkP.DockBg else light.DockBg }.value,
+        dockBorder = t.animateColor(transitionSpec = { spec }, label = "dockBorder") { if (it) darkP.DockBorder else light.DockBorder }.value,
+        overlayScrim = t.animateColor(transitionSpec = { spec }, label = "scrim") { if (it) darkP.OverlayScrim else light.OverlayScrim }.value,
+        toastBg = t.animateColor(transitionSpec = { spec }, label = "toastBg") { if (it) darkP.ToastBg else light.ToastBg }.value,
+        toastText = t.animateColor(transitionSpec = { spec }, label = "toastText") { if (it) darkP.ToastText else light.ToastText }.value,
+        fabBg = t.animateColor(transitionSpec = { spec }, label = "fabBg") { if (it) darkP.FabBg else light.FabBg }.value,
+        fabText = t.animateColor(transitionSpec = { spec }, label = "fabText") { if (it) darkP.FabText else light.FabText }.value,
+        fabBadge = t.animateColor(transitionSpec = { spec }, label = "fabBadge") { if (it) darkP.FabBadge else light.FabBadge }.value,
+        fabBadgeText = t.animateColor(transitionSpec = { spec }, label = "fabBadgeText") { if (it) darkP.FabBadgeText else light.FabBadgeText }.value,
     )
-
+    
     CompositionLocalProvider(LocalWarmPalette provides palette, content = content)
 }

@@ -10,6 +10,8 @@ import com.cleanforge.core.fs.SafeDeleter
 import com.cleanforge.core.fs.SizeResult
 import com.cleanforge.core.fs.StorageWalker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 
 /** Runs in the app process. Reaches shared storage with All-files access; NOT Android/data or Android/obb. */
@@ -17,7 +19,6 @@ class StandardFileBackend(private val fs: FsOps) : FileOperationBackend {
     override val name: String = "App (All-files access)"
 
     private val walker = StorageWalker(fs)
-    private val deleter = SafeDeleter(fs)
 
     override suspend fun lstat(path: String): FsResult<FsStat> = withContext(Dispatchers.IO) {
         when (val p = fs.probe(path)) {
@@ -57,5 +58,9 @@ class StandardFileBackend(private val fs: FsOps) : FileOperationBackend {
     }
 
     override suspend fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult =
-        withContext(Dispatchers.IO) { deleter.delete(path, mode, expected) }
+        withContext(Dispatchers.IO) {
+            // Cancelling the caller stops a big folder between entries instead of after the whole thing.
+            val job = currentCoroutineContext()[Job]
+            SafeDeleter(fs, isCancelled = { job?.isActive == false }).delete(path, mode, expected)
+        }
 }

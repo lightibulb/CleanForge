@@ -45,17 +45,25 @@ class DuplicateScanner(
 
     private val limits = WalkLimits(maxDepth = 32, maxEntries = 100_000)
 
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
     override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
         // Pass 1: size groups.
         val bySize = HashMap<Long, MutableList<StorageWalker.Entry>>()
         var n = 0
         for (dir in LargeFileScanner.ROOTS) {
-            for (e in StorageWalker(fs).walk("$root/$dir", limits)) {
+            for (e in StorageWalker(fs).walkNoting("$root/$dir", notes, limits = limits)) {
                 if (++n % 256 == 0) currentCoroutineContext().ensureActive()
                 if (e.stat.type != FsType.FILE || e.stat.size < minBytes) continue
                 bySize.getOrPut(e.stat.size) { ArrayList() } += e
             }
         }
+
+        incomplete = notes.reasons() // the walking is done; hashing below cannot add to it
 
         // Pass 2: partial hash among same-size files that are not the same inode.
         val byPartial = HashMap<String, MutableList<StorageWalker.Entry>>()

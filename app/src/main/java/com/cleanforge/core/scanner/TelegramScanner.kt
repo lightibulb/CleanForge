@@ -1,86 +1,42 @@
 package com.cleanforge.core.scanner
 
-import com.cleanforge.core.backend.FileOperationBackend
+import com.cleanforge.core.backend.FileReadBackend
 import com.cleanforge.core.backend.PackageInventory
-import com.cleanforge.core.fs.DeleteMode
-import com.cleanforge.core.fs.FsType
-import com.cleanforge.core.model.CleaningCategory
 import com.cleanforge.core.model.ConfidenceLevel
-import com.cleanforge.core.model.Reversibility
 import com.cleanforge.core.model.RiskLevel
-import com.cleanforge.core.model.ScanItem
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
 import java.util.concurrent.TimeUnit
 
+/** Telegram's four media folders under Android/media, files older than 14 days. Never pre-selected. */
 class TelegramScanner(
-    private val backend: FileOperationBackend,
-    private val inventory: PackageInventory,
+    backend: FileReadBackend,
+    inventory: PackageInventory,
     private val storage: String,
-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
-) : Scanner {
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
 
     override val id = "telegram_forensics"
     override val displayName = "Telegram Forensics"
-    // Android/media is accessible via MANAGE_EXTERNAL_STORAGE, not Shizuku.
+
+    // Android/media is reachable with All-files access; no Shizuku needed.
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.ON_DEMAND
 
-    private val pkg = "org.telegram.messenger"
+    override val packages = listOf("org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.plus")
 
-    override fun scan(): Flow<List<ScanItem>> = flow {
-        if (!inventory.isCurrentlyInstalled(pkg)) return@flow
-
+    override fun targets(pkg: String): List<Target> {
         val base = "$storage/Android/media/$pkg/Telegram"
-        val now = timeProvider()
-        val minAge = TimeUnit.DAYS.toMillis(14)
-        val batch = mutableListOf<ScanItem>()
-
-        val targets = listOf(
-            "$base/Telegram Video" to "Telegram Video Cache (>14 days)",
-            "$base/Telegram Audio" to "Telegram Audio Cache (>14 days)",
-            "$base/Telegram Images" to "Telegram Image Cache (>14 days)",
-            "$base/Telegram Documents" to "Telegram Document Cache (>14 days)"
+        fun folder(name: String, what: String) = Target(
+            dir = "$base/$name",
+            reason = "$what that Telegram downloaded to this phone.",
+            minAgeMs = TimeUnit.DAYS.toMillis(14),
+            confidence = ConfidenceLevel.MEDIUM,
+            risk = RiskLevel.ELEVATED
         )
-
-        targets.forEach { (folderPath, reason) ->
-            runCatching {
-                val childNames = backend.list(folderPath) ?: return@runCatching
-                childNames.forEach { name ->
-                    val fullPath = "$folderPath/$name"
-                    val stat = backend.lstat(fullPath) ?: return@forEach
-                    if (stat.type == FsType.FILE) {
-                        val age = now - stat.mtimeMs
-                        if (age >= minAge) {
-                            batch.add(
-                                ScanItem(
-                                    path = fullPath,
-                                    sizeBytes = stat.size,
-                                    category = CleaningCategory.FORENSIC_MEDIA,
-                                    reasonForFlagging = reason,
-                                    confidence = ConfidenceLevel.MEDIUM,
-                                    risk = RiskLevel.ELEVATED,
-                                    owningPackage = pkg,
-                                    requiresShizuku = false,
-                                    deleteMode = DeleteMode.FILE,
-                                    reversibility = Reversibility.NOT_REVERSIBLE,
-                                    lastModified = stat.mtimeMs,
-                                    fingerprint = stat,
-                                    isPreselected = false
-                                )
-                            )
-                            if (batch.size >= BATCH_SIZE) {
-                                emit(batch.toList())
-                                batch.clear()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (batch.isNotEmpty()) emit(batch.toList())
-    }.flowOn(Dispatchers.IO)
+        return listOf(
+            folder("Telegram Video", "A video"),
+            folder("Telegram Audio", "An audio file"),
+            folder("Telegram Images", "An image"),
+            folder("Telegram Documents", "A document")
+        )
+    }
 }

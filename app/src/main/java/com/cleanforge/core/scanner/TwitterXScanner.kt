@@ -1,92 +1,41 @@
 package com.cleanforge.core.scanner
 
-import com.cleanforge.core.privileged.PrivilegedOperation
-import com.cleanforge.core.backend.FileOperationBackend
+import com.cleanforge.core.backend.FileReadBackend
 import com.cleanforge.core.backend.PackageInventory
-import com.cleanforge.core.fs.DeleteMode
-import com.cleanforge.core.fs.FsType
-import com.cleanforge.core.model.CleaningCategory
 import com.cleanforge.core.model.ConfidenceLevel
-import com.cleanforge.core.model.Reversibility
 import com.cleanforge.core.model.RiskLevel
-import com.cleanforge.core.model.ScanItem
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
+import com.cleanforge.core.privileged.PrivilegedOperation
 import java.util.concurrent.TimeUnit
 
+/**
+ * Twitter/X media cache under Android/data, files older than 7 days.
+ *
+ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
+ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
+ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
+ */
 class TwitterXScanner(
-    private val backend: FileOperationBackend,
-    private val inventory: PackageInventory,
+    backend: FileReadBackend,
+    inventory: PackageInventory,
     private val storage: String,
-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
-) : Scanner {
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
 
     override val id = "twitter_x_forensics"
     override val displayName = "Twitter/X Forensics"
     override val requirement = Requirement.SHIZUKU
-	override val privilegedOperations = setOf(
-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
-)
+    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
     override val mode = ScanMode.ON_DEMAND
 
-    private val pkg = "com.twitter.android"
-    private val pkgLite = "com.twitter.android.lite"
+    override val packages = listOf("com.twitter.android", "com.twitter.android.lite")
 
-    override fun scan(): Flow<List<ScanItem>> = flow {
-        val activePkg = when {
-            inventory.isCurrentlyInstalled(pkg) -> pkg
-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
-            else -> return@flow
-        }
-
-        val now = timeProvider()
-        val minAge = TimeUnit.DAYS.toMillis(7)
-        val batch = mutableListOf<ScanItem>()
-
-        val targets = listOf(
-            "$storage/Android/data/$activePkg/cache" to "Twitter/X Media Cache (>7 days)"
+    override fun targets(pkg: String): List<Target> = listOf(
+        Target(
+            dir = "$storage/Android/data/$pkg/cache",
+            reason = "Cached Twitter/X media.",
+            minAgeMs = TimeUnit.DAYS.toMillis(7),
+            confidence = ConfidenceLevel.HIGH,
+            risk = RiskLevel.SAFE
         )
-
-        targets.forEach { (folderPath, reason) ->
-            runCatching {
-                val childNames = backend.list(folderPath) ?: return@runCatching
-                childNames.forEach { name ->
-                    val fullPath = "$folderPath/$name"
-                    val stat = backend.lstat(fullPath) ?: return@forEach
-                    
-                    if (stat.type == FsType.FILE) {
-                        val age = now - stat.mtimeMs
-                        if (age >= minAge) {
-                            batch.add(
-                                ScanItem(
-                                    path = fullPath,
-                                    sizeBytes = stat.size,
-                                    category = CleaningCategory.FORENSIC_MEDIA,
-                                    reasonForFlagging = reason,
-                                    confidence = ConfidenceLevel.HIGH,
-                                    risk = RiskLevel.SAFE,
-                                    owningPackage = activePkg,
-                                    requiresShizuku = true,
-                                    deleteMode = DeleteMode.FILE,
-                                    reversibility = Reversibility.NOT_REVERSIBLE,
-                                    lastModified = stat.mtimeMs,
-                                    fingerprint = stat,
-                                    isPreselected = false
-                                )
-                            )
-                            if (batch.size >= BATCH_SIZE) {
-                                emit(batch.toList())
-                                batch.clear()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (batch.isNotEmpty()) emit(batch.toList())
-
-    }.flowOn(Dispatchers.IO)
+    )
 }

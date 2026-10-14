@@ -3,8 +3,12 @@ package com.cleanforge.core.shizuku
 import android.content.Context
 import android.content.pm.PackageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -20,17 +24,20 @@ class ShizukuManager @Inject constructor(
     private val _state = MutableStateFlow<ShizukuState>(ShizukuState.NotRunning)
     override val state: StateFlow<ShizukuState> = _state
 
-    private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
+    // Shizuku calls its listeners on the main thread, and refresh() makes binder calls: hand them to a worker.
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val binderReceived = Shizuku.OnBinderReceivedListener { io.launch { refresh() } }
     private val binderDead = Shizuku.OnBinderDeadListener { _state.value = ShizukuState.Disconnected }
     // The connector re-checks liveness on every acquire(), so a dead binder never leaves a stale service behind.
-    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> refresh() }
+    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> io.launch { refresh() } }
 
     /** Call once from Application.onCreate. Listeners live as long as the process. */
     fun register() {
         Shizuku.addBinderReceivedListenerSticky(binderReceived)
         Shizuku.addBinderDeadListener(binderDead)
         Shizuku.addRequestPermissionResultListener(permissionResult)
-        refresh()
+        io.launch { refresh() }
     }
 
     fun unregister() {
@@ -39,6 +46,8 @@ class ShizukuManager @Inject constructor(
         runCatching { Shizuku.removeRequestPermissionResultListener(permissionResult) }
     }
 
+    /** Synchronized so two overlapping refreshes cannot publish an older reading after a newer one. */
+    @Synchronized
     override fun refresh() {
         _state.value = currentState()
     }

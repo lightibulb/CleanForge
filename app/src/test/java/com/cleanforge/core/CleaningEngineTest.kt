@@ -407,4 +407,20 @@ class CleaningEngineTest {
         assertThat(fs.exists(p1)).isTrue()
         assertThat(fs.exists(p2)).isFalse()
     }
+
+    /** Counts how often the full package list is requested; everything else is the real fake. */
+    private class CountingInventory(private val delegate: PackageInventory) : PackageInventory by delegate {
+        var queries = 0
+        override fun knownPackageNames(): Set<String>? {
+            queries++
+            return delegate.knownPackageNames()
+        }
+    }
+
+    @Test fun `the package list is requested once per run, not once per item`() = runTest {
+        fs.file("$cachePath/a.bin", size = 40)
+        val counting = CountingInventory(inventory)
+        cleanWith(engine(inv = counting), cacheItem(), cacheItem(), cacheItem())
+        assertThat(counting.queries).isEqualTo(1)
+    }
 }

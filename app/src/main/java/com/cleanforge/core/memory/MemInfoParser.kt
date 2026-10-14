@@ -36,6 +36,7 @@ object MemInfoParser {
         }
 
         val total = bytes["MemTotal"] ?: return null
+        if (total <= 0L) return null // a zero-byte "snapshot" would read as real data; unknown is not zero
 
         val free = bytes["MemFree"] ?: 0L
         val buffers = bytes["Buffers"] ?: 0L

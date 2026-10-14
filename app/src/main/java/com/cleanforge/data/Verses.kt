@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.data
+package com.cleanforge.data
 
 data class Verse(val text: String, val ref: String)
 

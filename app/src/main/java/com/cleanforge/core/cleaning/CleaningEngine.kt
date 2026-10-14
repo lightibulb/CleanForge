@@ -14,7 +14,9 @@ import com.cleanforge.core.model.ItemStatus
 import com.cleanforge.core.model.ScanItem
 import com.cleanforge.core.privileged.FailureKind
 import com.cleanforge.core.privileged.MaintenanceResult
+import com.cleanforge.core.privileged.OperationCapability
 import com.cleanforge.core.privileged.PrivilegedExecutor
+import com.cleanforge.core.privileged.PrivilegedOperation
 import com.cleanforge.core.privileged.classifyDeletion
 import com.cleanforge.core.privileged.observePostState
 import com.cleanforge.core.privileged.toMaintenanceRequest
@@ -63,7 +65,18 @@ class CleaningEngine(
     private val capabilities: Capabilities
 ) {
 
+    /**
+     * What ONE run has already established, so a plan of hundreds of items does not repeat the two expensive questions
+     * (the full package list, the Shizuku capability probe) for every item. A new run starts empty: nothing is reused
+     * across runs. The cheap, per-package install state and the Shizuku authorization are still asked for every item.
+     */
+    private class RunCache {
+        var knownPackages: Set<String>? = null
+        val ready = HashMap<PrivilegedOperation, OperationCapability>()
+    }
+
     fun execute(confirmed: ConfirmedPlan): Flow<CleaningProgress> = flow {
+        val cache = RunCache()
         val items = confirmed.plan.items
         val outcomes = ArrayList<ItemOutcome>(items.size)
         var freed = 0L
@@ -72,7 +85,7 @@ class CleaningEngine(
             currentCoroutineContext().ensureActive()
             emit(CleaningProgress.ItemStarted(index + 1, items.size, item))
             val outcome = try {
-                processItem(item)
+                processItem(item, cache)
             } catch (ce: CancellationException) {
                 throw ce
             } catch (t: Throwable) {
@@ -86,7 +99,7 @@ class CleaningEngine(
         emit(CleaningProgress.Completed(CleaningReport(outcomes)))
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun processItem(item: ScanItem): ItemOutcome {
+    private suspend fun processItem(item: ScanItem, cache: RunCache): ItemOutcome {
         // ---- REVALIDATE ----
         val refusal = safety.rejectionReason(item)
         if (refusal != null) return skipped(item, "Safety check failed: $refusal")
@@ -101,10 +114,11 @@ class CleaningEngine(
         var known: Set<String> = emptySet()
         if (item.category == CleaningCategory.CORPSE_LEFTOVER || item.category == CleaningCategory.APP_CACHE) {
             val pkg = item.owningPackage ?: return skipped(item, "No package recorded for this folder")
-            val snapshot = inventory.knownPackageNames()
+            val snapshot = cache.knownPackages ?: inventory.knownPackageNames()
             if (snapshot == null || snapshot.size < MIN_PLAUSIBLE_PACKAGES) {
                 return skipped(item, "Could not verify which apps are installed")
             }
+            cache.knownPackages = snapshot
             known = snapshot
             // Two different questions: "known" includes data-kept uninstalls, "installed" does not. A failed query is
             // UNKNOWN and is never read as "not installed" (that would be the unsafe answer for a leftover).
@@ -120,17 +134,18 @@ class CleaningEngine(
             }
         }
 
-        return if (item.requiresShizuku) processPrivileged(item, known) else processStandard(item)
+        return if (item.requiresShizuku) processPrivileged(item, known, cache) else processStandard(item)
     }
 
     // ---------------------------------------------------------------- privileged path
 
-    private suspend fun processPrivileged(item: ScanItem, known: Set<String>): ItemOutcome {
+    private suspend fun processPrivileged(item: ScanItem, known: Set<String>, cache: RunCache): ItemOutcome {
         val expected = item.fingerprint ?: return skipped(item, "No scan snapshot for this item; scan again")
         val request = item.toMaintenanceRequest(known)
             ?: return skipped(item, "This item is not a kind of cleanup the Shizuku service supports, so it was left alone")
 
-        val readiness = capabilities.readiness(request.operation)
+        val readiness = cache.ready[request.operation]
+            ?: capabilities.readiness(request.operation).also { if (it.canAttempt) cache.ready[request.operation] = it }
         if (!readiness.canAttempt) return skipped(item, "Not available right now: ${readiness.reason}")
 
         when (val now = privileged.stat(item.path)) {

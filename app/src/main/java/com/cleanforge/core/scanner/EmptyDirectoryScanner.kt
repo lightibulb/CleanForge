@@ -31,15 +31,25 @@ class EmptyDirectoryScanner(
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.ON_DEMAND
 
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
     override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
         val batch = ArrayList<ScanItem>()
         var n = 0
         for (dir in listOf("Download", "Documents", "Pictures", "Movies")) {
             val walker = StorageWalker(fs)
-            for (e in walker.walk("$root/$dir", skipDir = { it.substringAfterLast('/').startsWith(".") })) {
+            for (e in walker.walkNoting("$root/$dir", notes, skipDir = { it.substringAfterLast('/').startsWith(".") })) {
                 if (++n % 256 == 0) currentCoroutineContext().ensureActive()
                 if (e.stat.type != FsType.DIRECTORY || e.name.startsWith(".")) continue
-                val children = fs.list(e.path) ?: continue
+                val children = fs.list(e.path)
+                if (children == null) { // cannot look inside: unknown, not "empty"
+                    notes.onUnreadable()
+                    continue
+                }
                 if (children.isNotEmpty()) continue
                 batch += ScanItem(
                     path = e.path,
@@ -59,6 +69,7 @@ class EmptyDirectoryScanner(
                 }
             }
         }
+        incomplete = notes.reasons()
         if (batch.isNotEmpty()) emit(batch.toList())
     }.flowOn(Dispatchers.IO)
 }

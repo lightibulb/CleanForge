@@ -77,4 +77,8 @@ class MemInfoParserTest {
     @Test fun `empty content returns null`() {
         assertThat(MemInfoParser.parse("", 0)).isNull()
     }
+
+    @Test fun `a zero MemTotal returns null, not a zero-byte snapshot`() {
+        assertThat(MemInfoParser.parse("MemTotal: 0 kB\nMemAvailable: 0 kB", 0)).isNull()
+    }
 }

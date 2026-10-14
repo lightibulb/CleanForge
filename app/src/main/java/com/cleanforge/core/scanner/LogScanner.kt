@@ -35,16 +35,26 @@ class LogScanner(
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.ON_DEMAND
 
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
     override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
         val batch = ArrayList<ScanItem>()
         var n = 0
-        for (e in StorageWalker(fs).walk("$root/Download")) {
+        for (e in StorageWalker(fs).walkNoting("$root/Download", notes)) {
             if (++n % 256 == 0) currentCoroutineContext().ensureActive()
             if (e.stat.type != FsType.FILE || e.stat.size <= 0L) continue
             if (!e.name.endsWith(".log", ignoreCase = true)) continue
             val ageDays = (nowMs() - e.stat.mtimeMs) / DAY_MS
             if (ageDays < minAgeDays) continue
-            val head = readHead(e.path) ?: continue
+            val head = readHead(e.path)
+            if (head == null) { // unreadable: could not be checked, so it is not proposed
+                notes.onUnreadable()
+                continue
+            }
             if (!looksLikeText(head)) continue
             batch += ScanItem(
                 path = e.path,
@@ -64,6 +74,7 @@ class LogScanner(
                 batch.clear()
             }
         }
+        incomplete = notes.reasons()
         if (batch.isNotEmpty()) emit(batch.toList())
     }.flowOn(Dispatchers.IO)
 

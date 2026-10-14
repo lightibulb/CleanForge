@@ -33,10 +33,16 @@ class TempScanner(
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.QUICK
 
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
     override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
         val batch = ArrayList<ScanItem>()
         var n = 0
-        for (e in StorageWalker(fs).walk("$root/Download")) {
+        for (e in StorageWalker(fs).walkNoting("$root/Download", notes)) {
             if (++n % 256 == 0) currentCoroutineContext().ensureActive()
             if (e.stat.type != FsType.FILE || e.stat.size <= 0L) continue
             val ext = e.name.substringAfterLast('.', "").lowercase()
@@ -62,6 +68,7 @@ class TempScanner(
                 batch.clear()
             }
         }
+        incomplete = notes.reasons()
         if (batch.isNotEmpty()) emit(batch.toList())
     }.flowOn(Dispatchers.IO)
 

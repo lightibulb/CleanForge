@@ -33,11 +33,17 @@ class LargeFileScanner(
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.ON_DEMAND
 
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
     override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
         val heap = PriorityQueue<ScanItem>(compareBy<ScanItem> { it.sizeBytes })
         var n = 0
         for (dir in ROOTS) {
-            for (e in StorageWalker(fs).walk("$root/$dir")) {
+            for (e in StorageWalker(fs).walkNoting("$root/$dir", notes)) {
                 if (++n % 256 == 0) currentCoroutineContext().ensureActive()
                 if (e.stat.type != FsType.FILE || e.stat.size < thresholdBytes) continue
                 heap.add(
@@ -58,6 +64,7 @@ class LargeFileScanner(
                 if (heap.size > topN) heap.poll()
             }
         }
+        incomplete = notes.reasons()
         if (heap.isNotEmpty()) emit(heap.sortedByDescending { it.sizeBytes })
     }.flowOn(Dispatchers.IO)
 

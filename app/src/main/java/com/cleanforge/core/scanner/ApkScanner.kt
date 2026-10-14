@@ -34,14 +34,21 @@ class ApkScanner(
     override val requirement = Requirement.ALL_FILES_ACCESS
     override val mode = ScanMode.QUICK
 
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
     override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
         val batch = ArrayList<ScanItem>()
         var n = 0
         for (dir in listOf("Download", "Documents")) {
-            for (e in StorageWalker(fs).walk("$root/$dir")) {
+            for (e in StorageWalker(fs).walkNoting("$root/$dir", notes)) {
                 if (++n % 128 == 0) currentCoroutineContext().ensureActive()
                 if (e.stat.type != FsType.FILE) continue
                 if (!e.name.endsWith(".apk", ignoreCase = true)) continue
+                currentCoroutineContext().ensureActive() // parsing an APK is slow; stay responsive to cancellation
                 val info = inventory.archiveInfo(e.path) ?: continue
                 val installed = inventory.installedVersionCode(info.packageName)
                 val sameOrNewerInstalled = installed != null && installed >= info.versionCode
@@ -70,6 +77,7 @@ class ApkScanner(
                 }
             }
         }
+        incomplete = notes.reasons()
         if (batch.isNotEmpty()) emit(batch.toList())
     }.flowOn(Dispatchers.IO)
 }

@@ -42,7 +42,7 @@ class AndroidBackgroundProcessKiller(context: Context) : BackgroundProcessKiller
         return try {
             am.killBackgroundProcesses(packageName)
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             false
         }
     }
@@ -50,7 +50,7 @@ class AndroidBackgroundProcessKiller(context: Context) : BackgroundProcessKiller
     private fun isSystemOrUnknown(packageName: String): Boolean = try {
         val flags = packageManager.getApplicationInfo(packageName, 0).flags
         (flags and ApplicationInfo.FLAG_SYSTEM) != 0
-    } catch (_: Exception) {
+    } catch (e: Exception) {
         true
     }
 }
