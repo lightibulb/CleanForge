@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.ui.util
+package com.cleanforge.ui.util
 
 import android.content.Context
 import android.os.Build
