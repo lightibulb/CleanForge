@@ -1,6 +1,8 @@
 package com.yourpackage.cleanforge.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -22,16 +24,52 @@ val Inter = FontFamily(
 )
 
 val WarmTypography = Typography(
-    displayLarge = TextStyle(Fraunces, FontWeight.Normal, 40.sp, 44.sp, letterSpacing = (-0.03).sp),
-    displayMedium = TextStyle(Fraunces, FontWeight.Normal, 32.sp, 36.sp, letterSpacing = (-0.025).sp),
-    headlineLarge = TextStyle(Fraunces, FontWeight.Normal, 30.sp, 33.sp, letterSpacing = (-0.02).sp),
-    headlineMedium = TextStyle(Fraunces, FontWeight.Medium, 24.sp, 29.sp, letterSpacing = (-0.02).sp),
-    titleLarge = TextStyle(Fraunces, FontWeight.Medium, 20.sp, 24.sp, letterSpacing = (-0.01).sp),
-    titleMedium = TextStyle(Fraunces, FontWeight.Medium, 16.sp, 20.sp, letterSpacing = (-0.01).sp),
-    bodyLarge = TextStyle(Inter, FontWeight.Normal, 15.sp, 22.sp),
-    bodyMedium = TextStyle(Inter, FontWeight.Normal, 13.5.sp, 20.sp),
-    bodySmall = TextStyle(Inter, FontWeight.Normal, 12.5.sp, 18.sp),
-    labelLarge = TextStyle(Inter, FontWeight.Medium, 13.5.sp, 18.sp, letterSpacing = 0.1.sp),
-    labelMedium = TextStyle(Inter, FontWeight.Medium, 11.sp, 14.sp, letterSpacing = 1.3.sp),
-    labelSmall = TextStyle(Inter, FontWeight.Medium, 10.sp, 13.sp, letterSpacing = 0.2.sp),
+    displayLarge = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Fraunces, fontWeight = FontWeight.Normal, fontSize = 40.sp, letterSpacing = (-0.03).sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 44.sp)
+    ),
+    displayMedium = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Fraunces, fontWeight = FontWeight.Normal, fontSize = 32.sp, letterSpacing = (-0.025).sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 36.sp)
+    ),
+    headlineLarge = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Fraunces, fontWeight = FontWeight.Normal, fontSize = 30.sp, letterSpacing = (-0.02).sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 33.sp)
+    ),
+    headlineMedium = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Fraunces, fontWeight = FontWeight.Medium, fontSize = 24.sp, letterSpacing = (-0.02).sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 29.sp)
+    ),
+    titleLarge = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Fraunces, fontWeight = FontWeight.Medium, fontSize = 20.sp, letterSpacing = (-0.01).sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 24.sp)
+    ),
+    titleMedium = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Fraunces, fontWeight = FontWeight.Medium, fontSize = 16.sp, letterSpacing = (-0.01).sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 20.sp)
+    ),
+    bodyLarge = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 15.sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 22.sp)
+    ),
+    bodyMedium = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 13.5.sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 20.sp)
+    ),
+    bodySmall = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 12.5.sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 18.sp)
+    ),
+    labelLarge = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 13.5.sp, letterSpacing = 0.1.sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 18.sp)
+    ),
+    labelMedium = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 11.sp, letterSpacing = 1.3.sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 14.sp)
+    ),
+    labelSmall = TextStyle(
+        spanStyle = SpanStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 10.sp, letterSpacing = 0.2.sp),
+        paragraphStyle = ParagraphStyle(lineHeight = 13.sp)
+    ),
 )
