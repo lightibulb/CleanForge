@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.ui.theme
+package com.cleanforge.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
