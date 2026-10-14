@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.ui
+package com.cleanforge.ui
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
