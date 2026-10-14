@@ -14,8 +14,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cleanforge.core.memory.MemoryPressure
 import com.cleanforge.core.memory.RamSnapshot
 import com.cleanforge.ui.RamViewModel
@@ -32,12 +32,12 @@ import com.cleanforge.ui.RamViewModel
 fun RamScreen(
     viewModel: RamViewModel = hiltViewModel()
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
-    // Observe only while this screen is composed.
-    DisposableEffect(Unit) {
+    // Read /proc/meminfo only while the screen is visible: stops when the app goes to the background.
+    LifecycleStartEffect(viewModel) {
         viewModel.startObserving()
-        onDispose { viewModel.stopObserving() }
+        onStopOrDispose { viewModel.stopObserving() }
     }
 
     val snapshot = state.snapshot

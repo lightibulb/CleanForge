@@ -1,31 +1,35 @@
-package com.yourpackage.cleanforge
+package com.cleanforge
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
-import com.yourpackage.cleanforge.data.Preferences
-import com.yourpackage.cleanforge.ui.CleanForgeApp
-import com.yourpackage.cleanforge.ui.theme.CleanForgeTheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
+import com.cleanforge.ui.CleanForgeNavHost
+import com.cleanforge.ui.theme.CleanForgeTheme
+import dagger.hilt.android.AndroidEntryPoint
 
+/** @AndroidEntryPoint is required: the screens get their ViewModels from Hilt. */
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(0x00FFFFFF, 0x00FFFFFF),
-            navigationBarStyle = SystemBarStyle.light(0x00FFFFFF, 0x00FFFFFF),
-        )
+        enableEdgeToEdge()
         setContent {
-            val context = LocalContext.current
-            val prefs = remember { Preferences(context) }
-            val dark by prefs.dark.collectAsState(initial = false)
-            CleanForgeTheme(dark = dark) {
-                CleanForgeApp(prefs = prefs)
+            val dark = isSystemInDarkTheme()
+            // Bar icons must contrast with the theme (they were fixed to "light" and vanished in dark mode).
+            DisposableEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+                    navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark }
+                )
+                onDispose { }
+            }
+            CleanForgeTheme(darkTheme = dark) {
+                CleanForgeNavHost()
             }
         }
     }
