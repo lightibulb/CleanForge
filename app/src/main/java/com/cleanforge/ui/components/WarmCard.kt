@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.ui.components
+package com.cleanforge.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
