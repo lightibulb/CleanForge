@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.ui.components
+package com.cleanforge.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.spring
