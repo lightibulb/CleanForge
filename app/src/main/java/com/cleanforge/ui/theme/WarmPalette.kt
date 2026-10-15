@@ -71,10 +71,15 @@ val LocalWarmPalette = staticCompositionLocalOf {
 @Composable
 fun ProvideWarmPalette(dark: Boolean, content: @Composable () -> Unit) {
     val t = updateTransition(dark, label = "theme")
+    
+    // Define the spec
     val spec = tween<Color>(durationMillis = 350, easing = FastOutSlowInEasing)
+    
     val light = WarmLight
     val darkP = WarmDark
+    
     val palette = WarmPalette(
+        // FIX: Wrap 'spec' in a lambda { spec } for the transitionSpec parameter
         bg = t.animateColor(transitionSpec = { spec }, label = "bg") { if (it) darkP.Bg else light.Bg }.value,
         bg2 = t.animateColor(transitionSpec = { spec }, label = "bg2") { if (it) darkP.Bg2 else light.Bg2 }.value,
         surface = t.animateColor(transitionSpec = { spec }, label = "surface") { if (it) darkP.Surface else light.Surface }.value,
@@ -110,5 +115,6 @@ fun ProvideWarmPalette(dark: Boolean, content: @Composable () -> Unit) {
         fabBadge = t.animateColor(transitionSpec = { spec }, label = "fabBadge") { if (it) darkP.FabBadge else light.FabBadge }.value,
         fabBadgeText = t.animateColor(transitionSpec = { spec }, label = "fabBadgeText") { if (it) darkP.FabBadgeText else light.FabBadgeText }.value,
     )
+    
     CompositionLocalProvider(LocalWarmPalette provides palette, content = content)
 }

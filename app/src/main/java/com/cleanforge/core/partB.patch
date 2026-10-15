@@ -1,0 +1,96 @@
+diff -ruN origB/privileged/FileServiceCore.kt partB/privileged/FileServiceCore.kt
+--- origB/privileged/FileServiceCore.kt	2026-10-14 02:02:05.313764857 +0000
++++ partB/privileged/FileServiceCore.kt	2026-10-14 02:02:05.363052684 +0000
+@@ -74,7 +74,7 @@
+         // B) Implementation limitation: File.list() returned null despite being a dir.
+         // Treat as OS_DENIED or FAILED conservatively.
+         if (names == null) {
+-            return ListReply(ReplyStatus.OS_DENIED, detail = "Could not list contents of existing directory")
++            return ListReply(ReplyStatus.OS_DENIED)
+         }
+ 
+         val out = ArrayList<String>()
+diff -ruN origB/shizuku/ShizukuFileServiceConnector.kt partB/shizuku/ShizukuFileServiceConnector.kt
+--- origB/shizuku/ShizukuFileServiceConnector.kt	2026-10-14 02:02:05.313522266 +0000
++++ partB/shizuku/ShizukuFileServiceConnector.kt	2026-10-14 02:02:05.364176061 +0000
+@@ -14,8 +14,10 @@
+ import com.cleanforge.shizuku.IFileService
+ import dagger.hilt.android.qualifiers.ApplicationContext
+ import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
++import kotlinx.coroutines.withContext
+ import kotlinx.coroutines.withTimeoutOrNull
+ import rikka.shizuku.Shizuku
+ import java.util.concurrent.atomic.AtomicReference
+@@ -53,7 +55,10 @@
+             .version(BuildConfig.VERSION_CODE)
+     }
+ 
+-    override suspend fun acquire(): SessionResult = mutex.withLock {
++    // Shizuku status checks and bind/unbind are binder calls: always off the caller's (possibly main) thread.
++    override suspend fun acquire(): SessionResult = withContext(Dispatchers.IO) { acquireLocked() }
++
++    private suspend fun acquireLocked(): SessionResult = mutex.withLock {
+         manager.refresh()
+         val blocked = notReadyFor(manager.state.value)
+         if (blocked != null) {
+@@ -71,7 +76,7 @@
+     }
+ 
+     override suspend fun restart() {
+-        mutex.withLock { dropBinding(removeService = true) }
++        withContext(Dispatchers.IO) { mutex.withLock { dropBinding(removeService = true) } }
+     }
+ 
+     // ------------------------------------------------------------------ internals
+diff -ruN origB/shizuku/ShizukuManager.kt partB/shizuku/ShizukuManager.kt
+--- origB/shizuku/ShizukuManager.kt	2026-10-14 02:02:05.313444612 +0000
++++ partB/shizuku/ShizukuManager.kt	2026-10-14 02:02:05.365190981 +0000
+@@ -3,8 +3,12 @@
+ import android.content.Context
+ import android.content.pm.PackageManager
+ import dagger.hilt.android.qualifiers.ApplicationContext
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.SupervisorJob
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.launch
+ import rikka.shizuku.Shizuku
+ import javax.inject.Inject
+ import javax.inject.Singleton
+@@ -20,17 +24,20 @@
+     private val _state = MutableStateFlow<ShizukuState>(ShizukuState.NotRunning)
+     override val state: StateFlow<ShizukuState> = _state
+ 
+-    private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
++    // Shizuku calls its listeners on the main thread, and refresh() makes binder calls: hand them to a worker.
++    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++
++    private val binderReceived = Shizuku.OnBinderReceivedListener { io.launch { refresh() } }
+     private val binderDead = Shizuku.OnBinderDeadListener { _state.value = ShizukuState.Disconnected }
+     // The connector re-checks liveness on every acquire(), so a dead binder never leaves a stale service behind.
+-    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> refresh() }
++    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> io.launch { refresh() } }
+ 
+     /** Call once from Application.onCreate. Listeners live as long as the process. */
+     fun register() {
+         Shizuku.addBinderReceivedListenerSticky(binderReceived)
+         Shizuku.addBinderDeadListener(binderDead)
+         Shizuku.addRequestPermissionResultListener(permissionResult)
+-        refresh()
++        io.launch { refresh() }
+     }
+ 
+     fun unregister() {
+@@ -39,6 +46,8 @@
+         runCatching { Shizuku.removeRequestPermissionResultListener(permissionResult) }
+     }
+ 
++    /** Synchronized so two overlapping refreshes cannot publish an older reading after a newer one. */
++    @Synchronized
+     override fun refresh() {
+         _state.value = currentState()
+     }

@@ -24,16 +24,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.yourpackage.cleanforge.data.Confidence
-import com.yourpackage.cleanforge.data.Reversibility
-import com.yourpackage.cleanforge.data.Risk
-import com.yourpackage.cleanforge.data.ScanItem
-import com.yourpackage.cleanforge.data.formatBytes
-import com.yourpackage.cleanforge.ui.components.WarmCheck
-import com.yourpackage.cleanforge.ui.theme.Fraunces
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
-import com.yourpackage.cleanforge.ui.util.Haptic
-import com.yourpackage.cleanforge.ui.util.rememberHaptics
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import com.cleanforge.ui.sizeLabel
+import com.cleanforge.ui.components.WarmCheck
+import com.cleanforge.ui.theme.Fraunces
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
 
 @Composable
 fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
@@ -65,7 +65,7 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
             )
             Spacer(Modifier.height(3.dp))
             Text(
-                item.reason,
+                item.reasonForFlagging,
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.ink2,
                 maxLines = 2,
@@ -84,9 +84,9 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
                 RiskTag(item.risk)
                 NeutralTag(
                     when (item.confidence) {
-                        Confidence.HIGH -> "Strong evidence"
-                        Confidence.MEDIUM -> "Some evidence"
-                        Confidence.LOW -> "Weak evidence"
+                        ConfidenceLevel.HIGH -> "Strong evidence"
+                        ConfidenceLevel.MEDIUM -> "Some evidence"
+                        ConfidenceLevel.LOW -> "Weak evidence"
                     }
                 )
                 if (item.reversibility == Reversibility.NOT_REVERSIBLE) NeutralTag("No undo")
@@ -95,7 +95,7 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
         }
         Spacer(Modifier.width(12.dp))
         Text(
-            formatBytes(item.sizeBytes),
+            item.sizeLabel(), // says "at least" when part of the folder could not be read
             fontFamily = Fraunces,
             fontWeight = FontWeight.Medium,
             fontSize = 15.sp,
@@ -105,17 +105,17 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun RiskTag(risk: Risk) {
+private fun RiskTag(risk: RiskLevel) {
     val palette = LocalWarmPalette.current
     val (bg, fg) = when (risk) {
-        Risk.SAFE -> palette.sageSoft to palette.sage
-        Risk.ELEVATED -> palette.amberSoft to palette.amberDeep
-        Risk.DANGEROUS -> palette.brickSoft to palette.brick
+        RiskLevel.SAFE -> palette.sageSoft to palette.sage
+        RiskLevel.ELEVATED -> palette.amberSoft to palette.amberDeep
+        RiskLevel.DANGEROUS -> palette.brickSoft to palette.brick
     }
     val label = when (risk) {
-        Risk.SAFE -> "Low risk"
-        Risk.ELEVATED -> "Check first"
-        Risk.DANGEROUS -> "May be personal"
+        RiskLevel.SAFE -> "Low risk"
+        RiskLevel.ELEVATED -> "Check first"
+        RiskLevel.DANGEROUS -> "May be personal"
     }
     Text(
         label,

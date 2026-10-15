@@ -24,9 +24,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
-import com.yourpackage.cleanforge.ui.util.Haptic
-import com.yourpackage.cleanforge.ui.util.rememberHaptics
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
 
 enum class WarmBtnStyle { Primary, Clay, Soft, Outline, Ghost, Danger }
 

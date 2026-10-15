@@ -22,7 +22,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.LocalWarmPalette
 
 @Composable
 fun WarmCheck(checked: Boolean, modifier: Modifier = Modifier) {

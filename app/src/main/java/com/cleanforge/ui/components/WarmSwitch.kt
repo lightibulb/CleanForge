@@ -22,9 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
-import com.yourpackage.cleanforge.ui.util.Haptic
-import com.yourpackage.cleanforge.ui.util.rememberHaptics
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
 
 @Composable
 fun WarmSwitch(

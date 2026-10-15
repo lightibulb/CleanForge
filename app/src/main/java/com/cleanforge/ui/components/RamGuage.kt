@@ -24,8 +24,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
-import com.yourpackage.cleanforge.ui.theme.Fraunces
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.Fraunces
 
 @Composable
 fun RamGauge(usedFraction: Float, modifier: Modifier = Modifier) {

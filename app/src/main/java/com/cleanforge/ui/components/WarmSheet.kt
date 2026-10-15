@@ -33,7 +33,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.LocalWarmPalette
 
 @Composable
 fun WarmSheet(

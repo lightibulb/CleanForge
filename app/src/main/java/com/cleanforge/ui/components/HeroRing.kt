@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.ui.components
+package com.cleanforge.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -20,7 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.LocalWarmPalette
 
 @Composable
 fun HeroRing(usedFraction: Float, modifier: Modifier = Modifier) {

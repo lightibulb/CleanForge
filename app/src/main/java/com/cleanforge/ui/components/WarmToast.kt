@@ -20,7 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.LocalWarmPalette
 import kotlinx.coroutines.delay
 
 @Composable

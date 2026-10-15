@@ -13,7 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.LocalWarmPalette
 
 @Composable
 fun WarmCard(

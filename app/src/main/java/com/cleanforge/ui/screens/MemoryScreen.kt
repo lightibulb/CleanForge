@@ -15,12 +15,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.data.formatBytes
-import com.yourpackage.cleanforge.ui.components.RamGauge
-import com.yourpackage.cleanforge.ui.components.WarmButton
-import com.yourpackage.cleanforge.ui.components.WarmBtnStyle
-import com.yourpackage.cleanforge.ui.components.WarmCard
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.formatBytes
+import com.cleanforge.ui.components.RamGauge
+import com.cleanforge.ui.components.WarmButton
+import com.cleanforge.ui.components.WarmBtnStyle
+import com.cleanforge.ui.components.WarmCard
+import com.cleanforge.ui.theme.LocalWarmPalette
 
 @Composable
 fun MemoryScreen(
@@ -32,7 +32,7 @@ fun MemoryScreen(
     onClear: () -> Unit,
 ) {
     val palette = LocalWarmPalette.current
-    val usedFraction = (usedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+    val usedFraction = if (totalBytes > 0) (usedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
 
     Column(
         Modifier

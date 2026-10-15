@@ -38,9 +38,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.yourpackage.cleanforge.ui.theme.LocalWarmPalette
-import com.yourpackage.cleanforge.ui.util.Haptic
-import com.yourpackage.cleanforge.ui.util.rememberHaptics
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
 
 data class DockItem(val key: String, val label: String, val icon: ImageVector)
 
