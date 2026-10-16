@@ -50,7 +50,7 @@ fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
     val k = 1024.0
     val sizes = arrayOf("B", "KB", "MB", "GB", "TB")
-    val i = (kotlin.math.log(bytes.toDouble()) / kotlin.math.log(k)).toInt().coerceIn(0, 4)
+    val i = (kotlin.math.ln(bytes.toDouble()) / kotlin.math.ln(k)).toInt().coerceIn(0, 4)
     val v = bytes / Math.pow(k, i.toDouble())
     return String.format("%.1f %s", v, sizes[i])
 }
