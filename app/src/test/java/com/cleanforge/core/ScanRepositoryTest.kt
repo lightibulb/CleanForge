@@ -143,6 +143,6 @@ class ScanRepositoryTest {
             }
         )
         repo.scan(ScanMode.QUICK).toList()
-        assertThat(asked).hasSize(1)
+        assertThat(asked).containsExactly(reads.first())
     }
 }
