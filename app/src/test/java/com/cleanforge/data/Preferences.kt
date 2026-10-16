@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.data
+package com.cleanforge.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey

@@ -87,6 +87,7 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
                         ConfidenceLevel.HIGH -> "Strong evidence"
                         ConfidenceLevel.MEDIUM -> "Some evidence"
                         ConfidenceLevel.LOW -> "Weak evidence"
+                        ConfidenceLevel.UNKNOWN -> "Not verified"
                     }
                 )
                 if (item.reversibility == Reversibility.NOT_REVERSIBLE) NeutralTag("No undo")

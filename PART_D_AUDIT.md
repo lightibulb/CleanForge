@@ -30,6 +30,7 @@ I first completed (1). You prefer (2), so the final result is **the Warm UI wire
 | 5 | Medium | Edge-to-edge drew the title under the status bar and the dock/FAB under the navigation bar. | Insets applied to top bar, content, dock and FAB. |
 | 6 | Medium | Memory observed `/proc/meminfo` for as long as the tab was composed, and a `MemTotal` of 0 divided by zero. | Observes only while the Memory tab is visible and the app is started; guarded. |
 | 7 | Low | Duplicate `material-icons-extended`; DataStore version hard-coded. | One catalog entry each. |
+| 8 | High | `ItemRow`: the evidence label `when` listed 3 confidence levels but `ConfidenceLevel` has a 4th (`UNKNOWN`), so it did not compile. | Added `UNKNOWN -> "Not verified"`. |
 
 `buildConfig = true` is present (the Shizuku files need it).
 
@@ -48,7 +49,13 @@ I first completed (1). You prefer (2), so the final result is **the Warm UI wire
 - Not compiled or run (no Kotlin/Gradle/Android SDK here). Compose UI cannot be unit-tested on the JVM; `ConfirmationEvidenceTest` still covers the data the dialog renders. Every project import in the final UI was checked to resolve, and brace balance was checked.
 - Run: `./gradlew testDebugUnitTest assembleDebug`.
 
+## Files received after the first pass
+
+- `IFileService.aidl`: ids 1-12 plus `destroy` match `ShizukuFileService` and the contract test. No change.
+- `AppModule.kt`: every constructor it calls matches the real classes; `ShizukuManager`, the connector, `ScanRepository`, `SafetyValidator` and `PlanBuilder` are injectable; the three dormant scanners are correctly left out. No change.
+- `Fixtures.kt`: used to re-check my new tests (`HookedFs`, `NioFsOps`, `InMemoryFs`, `scanItem(pkg = ...)`). `StandardFileBackendTest` no longer depends on `FaultyFs`.
+
 ## Still needed from you
 
-- `di/AppModule.kt`: must provide `Capabilities` (`AndroidCapabilities`), `CleaningEngine`, the executor and registry as singletons, the backends and the scanner set (without the three dormant Android/data scanners).
-- `testutil/Fixtures.kt` and `IFileService.aidl` (see earlier parts).
+- `testutil/PrivilegedFakes.kt` (defines `FaultyFs` and the privileged fakes that `FileServiceCoreTest` and `PrivilegedExecutorTest` use); it was not in any zip.
+- The first build output: I cannot compile here, so send me the errors from `./gradlew testDebugUnitTest assembleDebug`.

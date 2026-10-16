@@ -1,0 +1,1329 @@
+diff -ruN orig/core-main/backend/StandardFileBackend.kt src/core-main/backend/StandardFileBackend.kt
+--- orig/core-main/backend/StandardFileBackend.kt	2026-10-13 20:42:24.803140564 +0000
++++ src/core-main/backend/StandardFileBackend.kt	2026-10-14 07:55:39.500424944 +0000
+@@ -10,6 +10,8 @@
+ import com.cleanforge.core.fs.SizeResult
+ import com.cleanforge.core.fs.StorageWalker
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.currentCoroutineContext
+ import kotlinx.coroutines.withContext
+ 
+ /** Runs in the app process. Reaches shared storage with All-files access; NOT Android/data or Android/obb. */
+@@ -17,7 +19,6 @@
+     override val name: String = "App (All-files access)"
+ 
+     private val walker = StorageWalker(fs)
+-    private val deleter = SafeDeleter(fs)
+ 
+     override suspend fun lstat(path: String): FsResult<FsStat> = withContext(Dispatchers.IO) {
+         when (val p = fs.probe(path)) {
+@@ -57,5 +58,9 @@
+     }
+ 
+     override suspend fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult =
+-        withContext(Dispatchers.IO) { deleter.delete(path, mode, expected) }
++        withContext(Dispatchers.IO) {
++            // Cancelling the caller stops a big folder between entries instead of after the whole thing.
++            val job = currentCoroutineContext()[Job]
++            SafeDeleter(fs, isCancelled = { job?.isActive == false }).delete(path, mode, expected)
++        }
+ }
+diff -ruN orig/core-main/cleaning/CleaningEngine.kt src/core-main/cleaning/CleaningEngine.kt
+--- orig/core-main/cleaning/CleaningEngine.kt	2026-10-13 20:42:24.804277199 +0000
++++ src/core-main/cleaning/CleaningEngine.kt	2026-10-14 07:55:49.222584756 +0000
+@@ -14,7 +14,9 @@
+ import com.cleanforge.core.model.ScanItem
+ import com.cleanforge.core.privileged.FailureKind
+ import com.cleanforge.core.privileged.MaintenanceResult
++import com.cleanforge.core.privileged.OperationCapability
+ import com.cleanforge.core.privileged.PrivilegedExecutor
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import com.cleanforge.core.privileged.classifyDeletion
+ import com.cleanforge.core.privileged.observePostState
+ import com.cleanforge.core.privileged.toMaintenanceRequest
+@@ -63,7 +65,18 @@
+     private val capabilities: Capabilities
+ ) {
+ 
++    /**
++     * What ONE run has already established, so a plan of hundreds of items does not repeat the two expensive questions
++     * (the full package list, the Shizuku capability probe) for every item. A new run starts empty: nothing is reused
++     * across runs. The cheap, per-package install state and the Shizuku authorization are still asked for every item.
++     */
++    private class RunCache {
++        var knownPackages: Set<String>? = null
++        val ready = HashMap<PrivilegedOperation, OperationCapability>()
++    }
++
+     fun execute(confirmed: ConfirmedPlan): Flow<CleaningProgress> = flow {
++        val cache = RunCache()
+         val items = confirmed.plan.items
+         val outcomes = ArrayList<ItemOutcome>(items.size)
+         var freed = 0L
+@@ -71,7 +84,14 @@
+         for ((index, item) in items.withIndex()) {
+             currentCoroutineContext().ensureActive()
+             emit(CleaningProgress.ItemStarted(index + 1, items.size, item))
+-            val outcome = processItem(item)
++            val outcome = try {
++                processItem(item, cache)
++            } catch (ce: CancellationException) {
++                throw ce
++            } catch (t: Throwable) {
++                // A failing capability/inventory call must cost ONE item, not the whole run and its report.
++                failed(item, t.message ?: "Cleanup failed unexpectedly")
++            }
+             outcomes += outcome
+             freed += outcome.bytesFreed
+             emit(CleaningProgress.Progress(index + 1, items.size, freed, item.displayName, outcome))
+@@ -79,7 +99,7 @@
+         emit(CleaningProgress.Completed(CleaningReport(outcomes)))
+     }.flowOn(Dispatchers.IO)
+ 
+-    private suspend fun processItem(item: ScanItem): ItemOutcome {
++    private suspend fun processItem(item: ScanItem, cache: RunCache): ItemOutcome {
+         // ---- REVALIDATE ----
+         val refusal = safety.rejectionReason(item)
+         if (refusal != null) return skipped(item, "Safety check failed: $refusal")
+@@ -94,10 +114,11 @@
+         var known: Set<String> = emptySet()
+         if (item.category == CleaningCategory.CORPSE_LEFTOVER || item.category == CleaningCategory.APP_CACHE) {
+             val pkg = item.owningPackage ?: return skipped(item, "No package recorded for this folder")
+-            val snapshot = inventory.knownPackageNames()
++            val snapshot = cache.knownPackages ?: inventory.knownPackageNames()
+             if (snapshot == null || snapshot.size < MIN_PLAUSIBLE_PACKAGES) {
+                 return skipped(item, "Could not verify which apps are installed")
+             }
++            cache.knownPackages = snapshot
+             known = snapshot
+             // Two different questions: "known" includes data-kept uninstalls, "installed" does not. A failed query is
+             // UNKNOWN and is never read as "not installed" (that would be the unsafe answer for a leftover).
+@@ -113,17 +134,18 @@
+             }
+         }
+ 
+-        return if (item.requiresShizuku) processPrivileged(item, known) else processStandard(item)
++        return if (item.requiresShizuku) processPrivileged(item, known, cache) else processStandard(item)
+     }
+ 
+     // ---------------------------------------------------------------- privileged path
+ 
+-    private suspend fun processPrivileged(item: ScanItem, known: Set<String>): ItemOutcome {
++    private suspend fun processPrivileged(item: ScanItem, known: Set<String>, cache: RunCache): ItemOutcome {
+         val expected = item.fingerprint ?: return skipped(item, "No scan snapshot for this item; scan again")
+         val request = item.toMaintenanceRequest(known)
+             ?: return skipped(item, "This item is not a kind of cleanup the Shizuku service supports, so it was left alone")
+ 
+-        val readiness = capabilities.readiness(request.operation)
++        val readiness = cache.ready[request.operation]
++            ?: capabilities.readiness(request.operation).also { if (it.canAttempt) cache.ready[request.operation] = it }
+         if (!readiness.canAttempt) return skipped(item, "Not available right now: ${readiness.reason}")
+ 
+         when (val now = privileged.stat(item.path)) {
+diff -ruN orig/core-main/cleaning/PlanBuilder.kt src/core-main/cleaning/PlanBuilder.kt
+--- orig/core-main/cleaning/PlanBuilder.kt	2026-10-13 20:42:24.804488929 +0000
++++ src/core-main/cleaning/PlanBuilder.kt	2026-10-13 20:42:44.170054853 +0000
+@@ -47,6 +47,7 @@
+         // Everything that is a candidate counts as "going away", even if it is refused further down: that can
+         // only make the rule stricter, never looser.
+         val deleting = afterOverlap.mapTo(HashSet<String>()) { it.path }
++        fun insideCleanedFolder(path: String) = folderRoots.any { path.startsWith("$it/") }
+         val copiesByGroup: Map<String, List<ScanItem>> = scanned
+             .filter { it.category == CleaningCategory.DUPLICATE && it.groupId != null }
+             .groupBy { it.groupId ?: "" }
+@@ -58,12 +59,14 @@
+                 continue
+             }
+             val copies = item.groupId?.let { copiesByGroup[it] }.orEmpty()
+-            val survivor = copies.firstOrNull { it.path != item.path && it.path !in deleting && it.fingerprint != null }
++            val others = copies.filter { it.path != item.path && it.path !in deleting && it.fingerprint != null }
++            // A copy inside a folder that is being emptied in the same run is not a keeper: it goes away too.
++            val survivor = others.firstOrNull { !insideCleanedFolder(it.path) }
+             if (survivor == null) {
+-                val why = if (copies.size < 2) {
+-                    "The other copies of this file are unknown; scan again"
+-                } else {
+-                    "Every copy of this file is selected; at least one must stay"
++                val why = when {
++                    copies.size < 2 -> "The other copies of this file are unknown; scan again"
++                    others.isNotEmpty() -> "The only other copy lies in a folder that is also being cleaned; at least one must stay"
++                    else -> "Every copy of this file is selected; at least one must stay"
+                 }
+                 rejected += RejectedItem(item, why)
+                 continue
+@@ -76,7 +79,10 @@
+         val plannedPaths = planned.mapTo(HashSet<String>()) { it.path }
+         val wholeGroupPaths = HashSet<String>()
+         for (copies in copiesByGroup.values) {
+-            if (copies.all { it.path in plannedPaths }) copies.mapTo(wholeGroupPaths) { it.path }
++            // "Going away" also covers a copy that lies inside a folder emptied in the same run.
++            if (copies.all { it.path in plannedPaths || insideCleanedFolder(it.path) }) {
++                copies.mapTo(wholeGroupPaths) { it.path }
++            }
+         }
+         val finalItems = ArrayList<ScanItem>()
+         for (item in planned) {
+diff -ruN orig/core-main/fs/SafeDeleter.kt src/core-main/fs/SafeDeleter.kt
+--- orig/core-main/fs/SafeDeleter.kt	2026-10-13 20:42:24.802935617 +0000
++++ src/core-main/fs/SafeDeleter.kt	2026-10-13 20:42:24.987886897 +0000
+@@ -26,7 +26,12 @@
+      [DeleteStatus.CANCELLED] (or [DeleteStatus.PARTIAL]-like counts in the result). Never interrupts a single
+      remove() call, and never changes deletion order or identity checks.
+      */
+-    private val isCancelled: () -> Boolean = { false }
++    private val isCancelled: () -> Boolean = { false },
++    /**
++     * The system-owned storage root. Only folders BELOW it are inspected as ancestors of the target; the system's own
++     * directories above it are not ours to judge (see [ancestorsAreSafe]).
++     */
++    private val trustedRoot: String = PathRules.ROOT
+ ) {
+     fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult {
+         // 1. Initial check on the target itself
+@@ -40,10 +45,10 @@
+             return DeleteResult(DeleteStatus.IDENTITY_CHANGED, detail = "Object changed since it was scanned")
+         }
+ 
+-        // 2. NEW: Validate ALL ancestors immediately after confirming target existence
++        // 2. Every folder between the storage root and the target must still be a real directory (not a link).
+         // This closes the TOCTOU gap between FileServiceCore's check and this execution.
+-        if (!validateAncestors(path, st.dev)) {
+-             return DeleteResult(DeleteStatus.REFUSED, detail = "One or more parent directories are unsafe (symlink/non-dir)")
++        if (!ancestorsAreSafe(path)) {
++            return DeleteResult(DeleteStatus.REFUSED, detail = "One or more parent directories are unsafe (symlink/non-dir)")
+         }
+ 
+         return when (mode) {
+@@ -55,26 +60,27 @@
+     }
+ 
+     /**
+-     * Verifies that every component of [path] below the storage root is a real directory 
+-     * and belongs to the same device ([rootDev]).
+-     * Returns true if safe, false if any ancestor is a symlink, file, or different mount.
++     * Every folder between [trustedRoot] and [path] must be a real directory, never a symlink or a file.
++     *
++     * Only the part BELOW [trustedRoot] is inspected. The directories above it belong to the system: on Android
++     * "/storage" is a tmpfs, a different device than the shared-storage mount, so comparing device numbers up there
++     * made every real deletion come back REFUSED. Device numbers of ancestors are deliberately not compared at all:
++     * a mount point among the ancestors cannot redirect the deletion, and mounts INSIDE the tree are handled in
++     * [purge]. A path that is not under [trustedRoot] (only tests; the validators confine production paths to
++     * PathRules.ROOT) has all of its ancestors inspected.
+      */
+-    private fun validateAncestors(path: String, rootDev: Long): Boolean {
++    private fun ancestorsAreSafe(path: String): Boolean {
+         val parts = path.split('/').filter { it.isNotEmpty() }
+-        if (parts.isEmpty()) return true // Root? Shouldn't happen in CleanForge context but safe fallback.
+-        
+-        var current = "/"
+-        // Iterate through all parents (exclude the last part which is the target itself, already checked)
+-        for (i in 0 until parts.size - 1) {
+-            val name = parts[i]
+-            current = if (current.endsWith("/")) "$current$name" else "$current/$name"
+-            
+-            val stat = fs.lstat(current) ?: return false // Missing parent is fatal
+-            if (stat.type != FsType.DIRECTORY) return false // Parent is not a dir (file/symlink)
+-            if (stat.dev != rootDev) return false // Cross-device mount detected
+-            
+-            // Optional: Check if it's a symlink explicitly? lstat returns SYMLINK type if it is one.
+-            // So 'stat.type != DIRECTORY' covers symlinks pointing to dirs/files.
++        if (parts.size < 2) return true
++        val rootParts = trustedRoot.split('/').filter { it.isNotEmpty() }
++        val underRoot = parts.size > rootParts.size && parts.subList(0, rootParts.size) == rootParts
++        val firstInspected = if (underRoot) rootParts.size else 0
++        var current = ""
++        for (i in 0 until parts.size - 1) { // the last part is the target itself, already inspected
++            current += "/" + parts[i]
++            if (i < firstInspected) continue
++            val stat = fs.lstat(current) ?: return false // a missing parent is fatal
++            if (stat.type != FsType.DIRECTORY) return false // lstat reports a link as SYMLINK, so links land here
+         }
+         return true
+     }
+diff -ruN orig/core-main/fs/StorageWalker.kt src/core-main/fs/StorageWalker.kt
+--- orig/core-main/fs/StorageWalker.kt	2026-10-13 20:42:24.802906645 +0000
++++ src/core-main/fs/StorageWalker.kt	2026-10-13 20:42:24.988869840 +0000
+@@ -15,7 +15,7 @@
+         limits: WalkLimits = WalkLimits(),
+         skipDir: (String) -> Boolean = { false },
+         onTruncated: () -> Unit = {},
+-        /** Called once per directory that exists but could not be listed (its contents are NOT part of the walk). */
++        /** Called once per entry that exists but could not be examined or listed, or that is a mount point (its contents are NOT part of the walk). */
+         onUnreadable: () -> Unit = {}
+     ): Sequence<Entry> = sequence {
+         val rootStat = fs.lstat(root)
+@@ -40,8 +40,18 @@
+                     return@sequence
+                 }
+                 val path = "$dir/$name"
+-                val st = fs.lstat(path) ?: continue
+-                if (st.dev != rootStat.dev) continue // mount boundary
++                val st = when (val probe = fs.probe(path)) {
++                    is FsProbe.Found -> probe.stat
++                    FsProbe.Missing -> continue // vanished between list and stat: nothing to count
++                    FsProbe.Denied, FsProbe.Error -> {
++                        onUnreadable() // it exists but cannot be examined: its bytes are unknown, never "zero"
++                        continue
++                    }
++                }
++                if (st.dev != rootStat.dev) { // mount boundary: not entered, so whatever is below it is not counted
++                    onUnreadable()
++                    continue
++                }
+                 yield(Entry(path, name, st, depth + 1))
+                 if (st.type == FsType.DIRECTORY && !skipDir(path)) {
+                     if (depth + 1 < limits.maxDepth) {
+diff -ruN orig/core-main/safety/SafetyValidator.kt src/core-main/safety/SafetyValidator.kt
+--- orig/core-main/safety/SafetyValidator.kt	2026-10-13 20:42:24.803457187 +0000
++++ src/core-main/safety/SafetyValidator.kt	2026-10-13 20:42:35.655591205 +0000
+@@ -64,6 +64,7 @@
+             CleaningCategory.FORENSIC_MEDIA -> {
+                 if (!isKnownForensicPath(c)) refuse("Not a known app-specific forensic media path")
+                 if (item.owningPackage == null) refuse("Forensic media items must declare their owning package")
++                if (item.owningPackage != c[2]) refuse("Owning package does not match the folder")
+             }
+             else -> Unit
+         }
+@@ -114,7 +115,7 @@
+         if (!c[0].equals("Android", ignoreCase = true)) return false
+ 
+         val area = c[1]
+-        val pkg = c[2].lowercase()
++        val pkg = c[2] // exact match: the folder name must be the package's real name
+         val tail = c.drop(3)
+         val lowerTail = tail.map { it.lowercase() }
+ 
+diff -ruN orig/core-main/scanner/InstagramScanner.kt src/core-main/scanner/InstagramScanner.kt
+--- orig/core-main/scanner/InstagramScanner.kt	2026-10-13 20:42:24.804843870 +0000
++++ src/core-main/scanner/InstagramScanner.kt	2026-10-14 02:44:19.711517337 +0000
+@@ -1,92 +1,41 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.privileged.PrivilegedOperation
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * Instagram media cache under Android/data, files older than 14 days.
++ *
++ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
++ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
++ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
++ */
+ class InstagramScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "instagram_forensics"
+     override val displayName = "Instagram Forensics"
+     override val requirement = Requirement.SHIZUKU
+-	override val privilegedOperations = setOf(
+-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+-)
++    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.instagram.android"
+-    private val pkgLite = "com.instagram.lite"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val activePkg = when {
+-            inventory.isCurrentlyInstalled(pkg) -> pkg
+-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
+-            else -> return@flow
+-        }
+-
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(14)
+-        val batch = mutableListOf<ScanItem>()
++    override val packages = listOf("com.instagram.android", "com.instagram.lite")
+ 
+-        val targets = listOf(
+-            "$storage/Android/data/$activePkg/cache" to "Instagram Media Cache (>14 days)"
++    override fun targets(pkg: String): List<Target> = listOf(
++        Target(
++            dir = "$storage/Android/data/$pkg/cache",
++            reason = "Cached Instagram media.",
++            minAgeMs = TimeUnit.DAYS.toMillis(14),
++            confidence = ConfidenceLevel.MEDIUM,
++            risk = RiskLevel.SAFE
+         )
+-
+-        targets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.MEDIUM,
+-                                    risk = RiskLevel.SAFE,
+-                                    owningPackage = activePkg,
+-                                    requiresShizuku = true,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++    )
++}
+diff -ruN orig/core-main/scanner/TelegramScanner.kt src/core-main/scanner/TelegramScanner.kt
+--- orig/core-main/scanner/TelegramScanner.kt	2026-10-13 20:42:24.804748649 +0000
++++ src/core-main/scanner/TelegramScanner.kt	2026-10-14 02:44:19.708135724 +0000
+@@ -1,86 +1,42 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
+ import java.util.concurrent.TimeUnit
+ 
++/** Telegram's four media folders under Android/media, files older than 14 days. Never pre-selected. */
+ class TelegramScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "telegram_forensics"
+     override val displayName = "Telegram Forensics"
+-    // Android/media is accessible via MANAGE_EXTERNAL_STORAGE, not Shizuku.
++
++    // Android/media is reachable with All-files access; no Shizuku needed.
+     override val requirement = Requirement.ALL_FILES_ACCESS
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "org.telegram.messenger"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        if (!inventory.isCurrentlyInstalled(pkg)) return@flow
++    override val packages = listOf("org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.plus")
+ 
++    override fun targets(pkg: String): List<Target> {
+         val base = "$storage/Android/media/$pkg/Telegram"
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(14)
+-        val batch = mutableListOf<ScanItem>()
+-
+-        val targets = listOf(
+-            "$base/Telegram Video" to "Telegram Video Cache (>14 days)",
+-            "$base/Telegram Audio" to "Telegram Audio Cache (>14 days)",
+-            "$base/Telegram Images" to "Telegram Image Cache (>14 days)",
+-            "$base/Telegram Documents" to "Telegram Document Cache (>14 days)"
++        fun folder(name: String, what: String) = Target(
++            dir = "$base/$name",
++            reason = "$what that Telegram downloaded to this phone.",
++            minAgeMs = TimeUnit.DAYS.toMillis(14),
++            confidence = ConfidenceLevel.MEDIUM,
++            risk = RiskLevel.ELEVATED
+         )
+-
+-        targets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.MEDIUM,
+-                                    risk = RiskLevel.ELEVATED,
+-                                    owningPackage = pkg,
+-                                    requiresShizuku = false,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++        return listOf(
++            folder("Telegram Video", "A video"),
++            folder("Telegram Audio", "An audio file"),
++            folder("Telegram Images", "An image"),
++            folder("Telegram Documents", "A document")
++        )
++    }
++}
+diff -ruN orig/core-main/scanner/TikTokScanner.kt src/core-main/scanner/TikTokScanner.kt
+--- orig/core-main/scanner/TikTokScanner.kt	2026-10-13 20:42:24.804726747 +0000
++++ src/core-main/scanner/TikTokScanner.kt	2026-10-14 02:44:19.709335278 +0000
+@@ -1,93 +1,48 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.privileged.PrivilegedOperation
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * TikTok's video cache and music cache under Android/data, files older than 7 days.
++ *
++ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
++ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
++ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
++ */
+ class TikTokScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "tiktok_forensics"
+     override val displayName = "TikTok Forensics"
+     override val requirement = Requirement.SHIZUKU
+-	override val privilegedOperations = setOf(
+-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+-	)
++    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.zhiliaoapp.musically"
+-    private val pkgLite = "com.zhiliaoapp.musically.go"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val activePkg = when {
+-            inventory.isCurrentlyInstalled(pkg) -> pkg
+-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
+-            else -> return@flow
+-        }
+-
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(7)
+-        val batch = mutableListOf<ScanItem>()
++    override val packages = listOf("com.zhiliaoapp.musically", "com.zhiliaoapp.musically.go")
+ 
+-        val cacheTargets = listOf(
+-            "$storage/Android/data/$activePkg/cache" to "TikTok Video Cache (>7 days)",
+-            "$storage/Android/data/$activePkg/files/.music" to "TikTok Music Cache (>7 days)"
++    override fun targets(pkg: String): List<Target> = listOf(
++        Target(
++            dir = "$storage/Android/data/$pkg/cache",
++            reason = "A cached TikTok video.",
++            minAgeMs = TimeUnit.DAYS.toMillis(7),
++            confidence = ConfidenceLevel.HIGH,
++            risk = RiskLevel.SAFE
++        ),
++        Target(
++            dir = "$storage/Android/data/$pkg/files/.music",
++            reason = "Cached TikTok music.",
++            minAgeMs = TimeUnit.DAYS.toMillis(7),
++            confidence = ConfidenceLevel.HIGH,
++            risk = RiskLevel.SAFE
+         )
+-
+-        cacheTargets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.HIGH,
+-                                    risk = RiskLevel.SAFE,
+-                                    owningPackage = activePkg,
+-                                    requiresShizuku = true,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++    )
++}
+diff -ruN orig/core-main/scanner/TwitterXScanner.kt src/core-main/scanner/TwitterXScanner.kt
+--- orig/core-main/scanner/TwitterXScanner.kt	2026-10-13 20:42:24.804928447 +0000
++++ src/core-main/scanner/TwitterXScanner.kt	2026-10-14 02:44:19.710404065 +0000
+@@ -1,92 +1,41 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.privileged.PrivilegedOperation
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * Twitter/X media cache under Android/data, files older than 7 days.
++ *
++ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
++ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
++ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
++ */
+ class TwitterXScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "twitter_x_forensics"
+     override val displayName = "Twitter/X Forensics"
+     override val requirement = Requirement.SHIZUKU
+-	override val privilegedOperations = setOf(
+-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+-)
++    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.twitter.android"
+-    private val pkgLite = "com.twitter.android.lite"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val activePkg = when {
+-            inventory.isCurrentlyInstalled(pkg) -> pkg
+-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
+-            else -> return@flow
+-        }
+-
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(7)
+-        val batch = mutableListOf<ScanItem>()
++    override val packages = listOf("com.twitter.android", "com.twitter.android.lite")
+ 
+-        val targets = listOf(
+-            "$storage/Android/data/$activePkg/cache" to "Twitter/X Media Cache (>7 days)"
++    override fun targets(pkg: String): List<Target> = listOf(
++        Target(
++            dir = "$storage/Android/data/$pkg/cache",
++            reason = "Cached Twitter/X media.",
++            minAgeMs = TimeUnit.DAYS.toMillis(7),
++            confidence = ConfidenceLevel.HIGH,
++            risk = RiskLevel.SAFE
+         )
+-
+-        targets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.HIGH,
+-                                    risk = RiskLevel.SAFE,
+-                                    owningPackage = activePkg,
+-                                    requiresShizuku = true,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++    )
++}
+diff -ruN orig/core-main/scanner/WhatsAppScanner.kt src/core-main/scanner/WhatsAppScanner.kt
+--- orig/core-main/scanner/WhatsAppScanner.kt	2026-10-13 20:42:24.804800018 +0000
++++ src/core-main/scanner/WhatsAppScanner.kt	2026-10-14 02:44:19.707030096 +0000
+@@ -1,158 +1,66 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * WhatsApp and WhatsApp Business, whichever is installed (both, if both are). Only the exact folders below are looked
++ * at, and only single files in them; everything else in WhatsApp's folders is the user's chat data and is left alone.
++ * The same allowlist is enforced a second time by SafetyValidator, so a scanner bug cannot widen it.
++ */
+ class WhatsAppScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "whatsapp_forensics"
+     override val displayName = "WhatsApp Forensics"
+-    // Android/media is accessible via MANAGE_EXTERNAL_STORAGE, not Shizuku.
++
++    // Android/media is reachable with All-files access; no Shizuku needed.
+     override val requirement = Requirement.ALL_FILES_ACCESS
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.whatsapp"
+-    private val pkgBusiness = "com.whatsapp.w4b"
++    override val packages = listOf("com.whatsapp", "com.whatsapp.w4b")
+ 
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val isInstalled = inventory.isCurrentlyInstalled(pkg) || inventory.isCurrentlyInstalled(pkgBusiness)
+-        if (!isInstalled) return@flow
+-
+-        val activePkg = if (inventory.isCurrentlyInstalled(pkg)) pkg else pkgBusiness
+-        val mediaBase = "$storage/Android/media/$activePkg/WhatsApp/Media"
+-        val dbBase = "$storage/Android/media/$activePkg/WhatsApp/Databases"
+-        val now = timeProvider()
+-        val batch = mutableListOf<ScanItem>()
+-
+-        // --- 1. .Statuses (expired > 24h) ---
+-        scanFolder(
+-            folderPath = "$mediaBase/.Statuses",
+-            now = now,
+-            minAgeMs = TimeUnit.HOURS.toMillis(24),
+-            reasonForFlagging = "WhatsApp Status (Expired >24h)",
+-            confidence = ConfidenceLevel.HIGH,
+-            risk = RiskLevel.SAFE,
+-            pkg = activePkg,
+-            batch = batch
+-        ) { emit(it) }
+-
+-        // --- 2. Sent folders (duplicates of gallery) ---
+-        val sentTargets = listOf(
+-            "$mediaBase/WhatsApp Video/Sent" to "WhatsApp Sent Video (Already in Gallery)",
+-            "$mediaBase/WhatsApp Images/Sent" to "WhatsApp Sent Image (Already in Gallery)",
+-            "$mediaBase/WhatsApp Animated Gifs/Sent" to "WhatsApp Sent GIF (Already in Gallery)"
++    override fun targets(pkg: String): List<Target> {
++        val whatsapp = "$storage/Android/media/$pkg/WhatsApp"
++        val media = "$whatsapp/Media"
++
++        // Sent media is a copy WhatsApp kept; it is the only copy if the user never saved it to the Gallery.
++        fun sent(folder: String, what: String) = Target(
++            dir = "$media/$folder/Sent",
++            reason = "$what that WhatsApp kept when you sent it. It may be the only copy if it is not in your Gallery.",
++            minAgeMs = 0L,
++            confidence = ConfidenceLevel.MEDIUM,
++            risk = RiskLevel.ELEVATED
+         )
+-        sentTargets.forEach { (path, reason) ->
+-            scanFolder(
+-                folderPath = path,
+-                now = now,
+-                minAgeMs = 0L,
+-                reasonForFlagging = reason,
++
++        return listOf(
++            Target(
++                dir = "$media/.Statuses",
++                reason = "A WhatsApp Status that expired more than 24 hours ago.",
++                minAgeMs = TimeUnit.HOURS.toMillis(24),
+                 confidence = ConfidenceLevel.HIGH,
+-                risk = RiskLevel.SAFE,
+-                pkg = activePkg,
+-                batch = batch
+-            ) { emit(it) }
+-        }
+-
+-        // --- 3. Old database backups (keep newest, delete rest > 7 days) ---
+-        runCatching {
+-            val childNames = backend.list(dbBase) ?: return@runCatching
+-            val dbFiles = childNames
+-                .filter { it.startsWith("msgstore-") }
+-                .mapNotNull { name ->
+-                    val fullPath = "$dbBase/$name"
+-                    backend.lstat(fullPath)?.let { stat -> fullPath to stat }
+-                }
+-                .sortedByDescending { (_, stat) -> stat.mtimeMs }
+-
+-            dbFiles.drop(1).forEach { (fullPath, stat) ->
+-                val ageDays = TimeUnit.MILLISECONDS.toDays(now - stat.mtimeMs)
+-                if (ageDays > 7) {
+-                    batch.add(
+-                        ScanItem(
+-                            path = fullPath,
+-                            sizeBytes = stat.size,
+-                            category = CleaningCategory.FORENSIC_MEDIA,
+-                            reasonForFlagging = "Old WhatsApp Backup ($ageDays days old)",
+-                            confidence = ConfidenceLevel.HIGH,
+-                            risk = RiskLevel.SAFE,
+-                            owningPackage = activePkg,
+-                            requiresShizuku = false,
+-                            deleteMode = DeleteMode.FILE,
+-                            reversibility = Reversibility.NOT_REVERSIBLE,
+-                            lastModified = stat.mtimeMs,
+-                            fingerprint = stat,
+-                            isPreselected = false
+-                        )
+-                    )
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) { emit(batch.toList()); batch.clear() }
+-    }.flowOn(Dispatchers.IO)
+-
+-    private suspend fun scanFolder(
+-        folderPath: String,
+-        now: Long,
+-        minAgeMs: Long,
+-        reasonForFlagging: String,
+-        confidence: ConfidenceLevel,
+-        risk: RiskLevel,
+-        pkg: String,
+-        batch: MutableList<ScanItem>,
+-        emitBlock: suspend (List<ScanItem>) -> Unit
+-    ) {
+-        runCatching {
+-            val childNames = backend.list(folderPath) ?: return@runCatching
+-            childNames.forEach { name ->
+-                val fullPath = "$folderPath/$name"
+-                val stat = backend.lstat(fullPath) ?: return@forEach
+-                if (stat.type == com.cleanforge.core.fs.FsType.FILE) {
+-                    val age = now - stat.mtimeMs
+-                    if (age >= minAgeMs) {
+-                        batch.add(
+-                            ScanItem(
+-                                path = fullPath,
+-                                sizeBytes = stat.size,
+-                                category = CleaningCategory.FORENSIC_MEDIA,
+-                                reasonForFlagging = reasonForFlagging,
+-                                confidence = confidence,
+-                                risk = risk,
+-                                owningPackage = pkg,
+-                                requiresShizuku = false,
+-                                deleteMode = DeleteMode.FILE,
+-                                reversibility = Reversibility.NOT_REVERSIBLE,
+-                                lastModified = stat.mtimeMs,
+-                                fingerprint = stat,
+-                                isPreselected = false
+-                            )
+-                        )
+-                        if (batch.size >= BATCH_SIZE) {
+-                            emitBlock(batch.toList())
+-                            batch.clear()
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-        // Silently skip if folder doesn't exist
++                risk = RiskLevel.SAFE
++            ),
++            sent("WhatsApp Video", "A video"),
++            sent("WhatsApp Images", "An image"),
++            sent("WhatsApp Animated Gifs", "An animated GIF"),
++            Target(
++                dir = "$whatsapp/Databases",
++                reason = "An old WhatsApp chat backup. The newest backup is always kept.",
++                minAgeMs = TimeUnit.DAYS.toMillis(7),
++                confidence = ConfidenceLevel.MEDIUM,
++                risk = RiskLevel.ELEVATED,
++                // Dated backups only ("msgstore-2026-08-01..."): never the live "msgstore.db.crypt14" or wa.db.
++                nameFilter = { it.startsWith("msgstore-") },
++                keepNewest = 1
++            )
++        )
+     }
+-}
+\ No newline at end of file
++}
+diff -ruN orig/core-test/CleaningEngineTest.kt src/core-test/CleaningEngineTest.kt
+--- orig/core-test/CleaningEngineTest.kt	2026-10-13 20:42:24.801377299 +0000
++++ src/core-test/CleaningEngineTest.kt	2026-10-14 07:56:21.398919384 +0000
+@@ -388,4 +388,39 @@
+         assertThat(progress.last().freedBytes).isEqualTo(30L)
+         assertThat((events[1] as CleaningProgress.ItemStarted).item.path).isEqualTo(a.path)
+     }
++
++    @Test fun `an unexpected exception costs one item, not the whole run and its report`() = runTest {
++        val p1 = "$ROOT/Download/a.bin"
++        val p2 = "$ROOT/Download/b.bin"
++        fs.file(p1, size = 10)
++        fs.file(p2, size = 10)
++        val flaky = object : com.cleanforge.core.backend.Capabilities {
++            var calls = 0
++            override fun hasAllFilesAccess(): Boolean {
++                if (calls++ == 0) throw IllegalStateException("binder died")
++                return true
++            }
++            override fun shizukuAuthorized() = true
++        }
++        val r = cleanWith(engine(capabilities = flaky), scanned(scanItem(p1)), scanned(scanItem(p2)))
++        assertThat(r.outcomes.map { it.status }).containsExactly(ItemStatus.FAILED, ItemStatus.DELETED).inOrder()
++        assertThat(fs.exists(p1)).isTrue()
++        assertThat(fs.exists(p2)).isFalse()
++    }
++
++    /** Counts how often the full package list is requested; everything else is the real fake. */
++    private class CountingInventory(private val delegate: PackageInventory) : PackageInventory by delegate {
++        var queries = 0
++        override fun knownPackageNames(): Set<String>? {
++            queries++
++            return delegate.knownPackageNames()
++        }
++    }
++
++    @Test fun `the package list is requested once per run, not once per item`() = runTest {
++        fs.file("$cachePath/a.bin", size = 40)
++        val counting = CountingInventory(inventory)
++        cleanWith(engine(inv = counting), cacheItem(), cacheItem(), cacheItem())
++        assertThat(counting.queries).isEqualTo(1)
++    }
+ }
+diff -ruN orig/core-test/ForensicValidatorTest.kt src/core-test/ForensicValidatorTest.kt
+--- orig/core-test/ForensicValidatorTest.kt	2026-10-13 20:42:24.801653213 +0000
++++ src/core-test/ForensicValidatorTest.kt	2026-10-13 20:43:45.166633207 +0000
+@@ -73,4 +73,8 @@
+         assertThat(reason("$ROOT/Android/data/com.twitter.android/cache/a.bin", pkg = "com.twitter.android")).isNull()
+         assertThat(reason("$ROOT/Android/data/com.instagram.android/databases/a.db", pkg = "com.instagram.android")).isNotNull()
+     }
++
++    @Test fun `a differently cased package folder is not the allowlisted package`() {
++        assertThat(reason("$ROOT/Android/media/com.WhatsApp/WhatsApp/Media/.Statuses/a.mp4", pkg = "com.WhatsApp")).isNotNull()
++    }
+ }
+diff -ruN orig/core-test/PlanBuilderTest.kt src/core-test/PlanBuilderTest.kt
+--- orig/core-test/PlanBuilderTest.kt	2026-10-13 20:42:24.801826727 +0000
++++ src/core-test/PlanBuilderTest.kt	2026-10-13 20:43:45.164293410 +0000
+@@ -117,4 +117,24 @@
+         assertThat(plan.items[0].category).isEqualTo(CleaningCategory.DUPLICATE)
+         assertThat(plan.items[0].keepPath).isEqualTo(b.path)
+     }
++
++    @Test fun `a copy inside a folder that is cleaned in the same run is not a keeper`() {
++        val folder = scanItem("$ROOT/DCIM/.thumbnails", CleaningCategory.THUMBNAIL)
++        val outside = copy("$ROOT/Download/a.jpg", ino = 1)
++        val inside = copy("$ROOT/DCIM/.thumbnails/a.jpg", ino = 2)
++        val plan = builder.build(selected = listOf(folder, outside), scanned = listOf(folder, outside, inside))
++        assertThat(plan.items).containsExactly(folder)
++        assertThat(plan.rejected.map { it.item.path }).containsExactly(outside.path)
++        assertThat(plan.rejected[0].reason).contains("at least one must stay")
++    }
++
++    @Test fun `another category cannot delete one copy while the other is wiped with its folder`() {
++        val folder = scanItem("$ROOT/DCIM/.thumbnails", CleaningCategory.THUMBNAIL)
++        val a = copy("$ROOT/Download/a.mp4", ino = 1)
++        val b = copy("$ROOT/DCIM/.thumbnails/a.mp4", ino = 2)
++        val bigA = scanItem(a.path, CleaningCategory.LARGE_FILE, fingerprint = a.fingerprint)
++        val plan = builder.build(selected = listOf(folder, bigA), scanned = listOf(folder, bigA, a, b))
++        assertThat(plan.items).containsExactly(folder)
++        assertThat(plan.rejected.map { it.item.path }).containsExactly(a.path)
++    }
+ }
+diff -ruN orig/core-test/SafeDeleterTest.kt src/core-test/SafeDeleterTest.kt
+--- orig/core-test/SafeDeleterTest.kt	2026-10-13 20:42:24.801487796 +0000
++++ src/core-test/SafeDeleterTest.kt	2026-10-13 20:43:45.162887297 +0000
+@@ -232,4 +232,35 @@
+         assertThat(r.status).isEqualTo(DeleteStatus.IDENTITY_CHANGED)
+         assertThat(f.exists()).isTrue()
+     }
++
++    // ---------- ancestors (regression: /storage is a tmpfs on a real phone, so every deletion was REFUSED) ----------
++
++    @Test fun `folders above the target may live on another device`() {
++        val target = dir("victim").also { write(File(it, "x.txt")) }
++        val ancestors = generateSequence(target.parentFile) { it.parentFile }.map { it.path }.toSet()
++        val fs = HookedFs().also { it.devOverride = { p -> if (p in ancestors) 777L else null } }
++        val r = deleter(fs).delete(target.path, DeleteMode.TREE, null)
++        assertThat(r.status).isEqualTo(DeleteStatus.OK)
++        assertThat(target.exists()).isFalse()
++    }
++
++    @Test fun `a symlinked parent folder is refused and nothing behind it is touched`() {
++        val victim = dir("real", "cache")
++        write(File(victim, "x.txt"))
++        val link = File(tmp.root, "link")
++        Files.createSymbolicLink(link.toPath(), File(tmp.root, "real").toPath())
++        val r = deleter().delete(File(link, "cache").path, DeleteMode.CONTENTS_ONLY, null)
++        assertThat(r.status).isEqualTo(DeleteStatus.REFUSED)
++        assertThat(File(victim, "x.txt").exists()).isTrue()
++    }
++
++    @Test fun `only folders below the trusted root are inspected`() {
++        val realRoot = dir("realroot")
++        write(File(realRoot, "sub/x.txt"))
++        val linkRoot = File(tmp.root, "linkroot")
++        Files.createSymbolicLink(linkRoot.toPath(), realRoot.toPath())
++        val r = SafeDeleter(NioFsOps, trustedRoot = linkRoot.path).delete(File(linkRoot, "sub").path, DeleteMode.TREE, null)
++        assertThat(r.status).isEqualTo(DeleteStatus.OK)
++        assertThat(File(realRoot, "sub").exists()).isFalse()
++    }
+ }
+diff -ruN orig/core-test/ScanRepositoryTest.kt src/core-test/ScanRepositoryTest.kt
+--- orig/core-test/ScanRepositoryTest.kt	2026-10-13 20:42:24.801923869 +0000
++++ src/core-test/ScanRepositoryTest.kt	2026-10-13 20:43:45.167261894 +0000
+@@ -131,4 +131,18 @@
+         repo.forget(setOf("$ROOT/Download/a.bin"))
+         assertThat(repo.items.value.map { it.path }).containsExactly("$ROOT/Download/b.bin")
+     }
++
++    @Test fun `asking stops at the first operation that is not usable`() = runTest {
++        val asked = mutableListOf<PrivilegedOperation>()
++        val scanner = FakeScanner("shizuku", Requirement.SHIZUKU, reads, listOf(item("a.bin")))
++        val repo = ScanRepository(
++            setOf(scanner),
++            caps { op ->
++                asked += op
++                capability(op, CapabilityStatus.UNSUPPORTED, "not here")
++            }
++        )
++        repo.scan(ScanMode.QUICK).toList()
++        assertThat(asked).hasSize(1)
++    }
+ }
+diff -ruN orig/core-test/StandardFileBackendTest.kt src/core-test/StandardFileBackendTest.kt
+--- orig/core-test/StandardFileBackendTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ src/core-test/StandardFileBackendTest.kt	2026-10-14 07:56:21.403399163 +0000
+@@ -0,0 +1,31 @@
++package com.cleanforge.core
++
++import com.cleanforge.core.backend.StandardFileBackend
++import com.cleanforge.core.fs.DeleteMode
++import com.cleanforge.testutil.FaultyFs
++import com.cleanforge.testutil.InMemoryFs
++import com.cleanforge.testutil.ROOT
++import com.google.common.truth.Truth.assertThat
++import kotlinx.coroutines.CoroutineStart
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.runBlocking
++import org.junit.Test
++
++class StandardFileBackendTest {
++    @Test fun `cancelling the caller stops a big delete between entries`() = runBlocking {
++        val mem = InMemoryFs()
++        val fs = FaultyFs(mem)
++        val dir = "$ROOT/Download/big"
++        for (n in 1..20) mem.file("$dir/f$n.bin", size = 10)
++
++        val job = launch(start = CoroutineStart.LAZY) {
++            StandardFileBackend(fs).delete(dir, DeleteMode.CONTENTS_ONLY, null)
++        }
++        fs.afterRemove = { job.cancel() } // the caller gives up right after the first entry is gone
++        job.join()
++
++        val left = mem.list(dir)!!.size
++        assertThat(left).isGreaterThan(0)
++        assertThat(left).isLessThan(20)
++    }
++}
+diff -ruN orig/core-test/StorageWalkerTest.kt src/core-test/StorageWalkerTest.kt
+--- orig/core-test/StorageWalkerTest.kt	1970-01-01 00:00:00.000000000 +0000
++++ src/core-test/StorageWalkerTest.kt	2026-10-13 20:43:45.172458664 +0000
+@@ -0,0 +1,84 @@
++package com.cleanforge.core
++
++import com.cleanforge.core.fs.FsOps
++import com.cleanforge.core.fs.FsProbe
++import com.cleanforge.core.fs.FsStat
++import com.cleanforge.core.fs.StorageWalker
++import com.cleanforge.testutil.NioFsOps
++import com.google.common.truth.Truth.assertThat
++import org.junit.Rule
++import org.junit.Test
++import org.junit.rules.TemporaryFolder
++import java.io.File
++import java.nio.file.Files
++
++class StorageWalkerTest {
++    @get:Rule val tmp = TemporaryFolder()
++
++    private fun write(f: File, text: String) {
++        f.parentFile.mkdirs()
++        Files.write(f.toPath(), text.toByteArray())
++    }
++
++    /**
++     * The real filesystem, except: [denied] exists but cannot be examined, [vanished] is gone by the time it is
++     * examined, and everything under [mount] reports another device.
++     */
++    private class QuirkyFs(
++        private val denied: String? = null,
++        private val vanished: String? = null,
++        private val mount: String? = null
++    ) : FsOps by NioFsOps {
++        private fun tweak(path: String, s: FsStat) = if (mount != null && path.startsWith(mount)) s.copy(dev = 4242L) else s
++
++        override fun lstat(path: String): FsStat? =
++            if (path == denied || path == vanished) null else NioFsOps.lstat(path)?.let { tweak(path, it) }
++
++        override fun probe(path: String): FsProbe = when (path) {
++            denied -> FsProbe.Denied
++            vanished -> FsProbe.Missing
++            else -> when (val r = NioFsOps.probe(path)) {
++                is FsProbe.Found -> FsProbe.Found(tweak(path, r.stat))
++                else -> r
++            }
++        }
++    }
++
++    private fun root() = File(tmp.root, "root").also {
++        write(File(it, "a.txt"), "1234")
++        write(File(it, "b.bin"), "123456789")
++    }
++
++    @Test fun `an entry that cannot be examined makes the size a lower bound instead of counting zero`() {
++        val root = root()
++        val r = StorageWalker(QuirkyFs(denied = File(root, "b.bin").path)).sizeOf(root.path)!!
++        assertThat(r.bytes).isEqualTo(4L)
++        assertThat(r.unreadable).isEqualTo(1)
++        assertThat(r.isExact).isFalse()
++    }
++
++    @Test fun `an entry that vanished between listing and examining is not counted as unreadable`() {
++        val root = root()
++        val r = StorageWalker(QuirkyFs(vanished = File(root, "b.bin").path)).sizeOf(root.path)!!
++        assertThat(r.bytes).isEqualTo(4L)
++        assertThat(r.unreadable).isEqualTo(0)
++        assertThat(r.isExact).isTrue()
++    }
++
++    @Test fun `a mount point is not entered and the size is reported as a lower bound`() {
++        val root = root()
++        write(File(root, "mnt/other-filesystem.txt"), "123456")
++        val r = StorageWalker(QuirkyFs(mount = File(root, "mnt").path)).sizeOf(root.path)!!
++        assertThat(r.bytes).isEqualTo(13L) // a.txt + b.bin only
++        assertThat(r.unreadable).isEqualTo(1)
++        assertThat(r.isExact).isFalse()
++    }
++
++    @Test fun `a plain tree is measured exactly`() {
++        val root = root()
++        write(File(root, "sub/deep/c.txt"), "12")
++        val r = StorageWalker(NioFsOps).sizeOf(root.path)!!
++        assertThat(r.bytes).isEqualTo(15L)
++        assertThat(r.isExact).isTrue()
++    }
++}
+diff -ruN orig/data/Preferences.kt src/data/Preferences.kt
+--- orig/data/Preferences.kt	2026-10-13 20:42:24.802536312 +0000
++++ src/data/Preferences.kt	2026-10-13 20:42:35.659556300 +0000
+@@ -1,4 +1,4 @@
+-package com.yourpackage.cleanforge.data
++package com.cleanforge.data
+ 
+ import android.content.Context
+ import androidx.datastore.preferences.core.booleanPreferencesKey
+@@ -19,6 +19,11 @@
+     val verses: Flow<Boolean> = context.dataStore.data.map { it[Keys.Verses] ?: true }
+     val dark: Flow<Boolean> = context.dataStore.data.map { it[Keys.Dark] ?: false }
+ 
+-    suspend fun setVerses(enabled: Boolean) = context.dataStore.edit { it[Keys.Verses] = enabled }
+-    suspend fun setDark(enabled: Boolean) = context.dataStore.edit { it[Keys.Dark] = enabled }
++    suspend fun setVerses(enabled: Boolean) {
++        context.dataStore.edit { it[Keys.Verses] = enabled }
++    }
++
++    suspend fun setDark(enabled: Boolean) {
++        context.dataStore.edit { it[Keys.Dark] = enabled }
++    }
+ }
+diff -ruN orig/data/ScanModels.kt src/data/ScanModels.kt
+--- orig/data/ScanModels.kt	2026-10-13 20:42:24.802610606 +0000
++++ src/data/ScanModels.kt	2026-10-13 20:42:35.658916936 +0000
+@@ -1,4 +1,4 @@
+-package com.yourpackage.cleanforge.data
++package com.cleanforge.data
+ 
+ enum class Risk { SAFE, ELEVATED, DANGEROUS }
+ enum class Confidence { HIGH, MEDIUM, LOW }
+diff -ruN orig/data/Verses.kt src/data/Verses.kt
+--- orig/data/Verses.kt	2026-10-13 20:42:24.802578893 +0000
++++ src/data/Verses.kt	2026-10-14 07:55:39.500877820 +0000
+@@ -1,4 +1,4 @@
+-package com.yourpackage.cleanforge.data
++package com.cleanforge.data
+ 
+ data class Verse(val text: String, val ref: String)
+ 
+diff -ruN orig/data/repository/ScanRepository.kt src/data/repository/ScanRepository.kt
+--- orig/data/repository/ScanRepository.kt	2026-10-13 20:42:24.802687892 +0000
++++ src/data/repository/ScanRepository.kt	2026-10-13 20:42:35.657874770 +0000
+@@ -2,6 +2,7 @@
+ 
+ import com.cleanforge.core.backend.Capabilities
+ import com.cleanforge.core.model.ScanItem
++import com.cleanforge.core.privileged.OperationCapability
+ import com.cleanforge.core.scanner.Requirement
+ import com.cleanforge.core.scanner.ScanMode
+ import com.cleanforge.core.scanner.Scanner
+@@ -98,9 +99,14 @@
+             if (capabilities.hasAllFilesAccess()) null else "needs All-files access"
+         Requirement.SHIZUKU -> {
+             // Ask per operation: a live Shizuku binder does not prove that listing or measuring works.
+-            val blocked = scanner.privilegedOperations
+-                .map { capabilities.readiness(it) }
+-                .firstOrNull { !it.canAttempt }
++            var blocked: OperationCapability? = null
++            for (op in scanner.privilegedOperations) {
++                val readiness = capabilities.readiness(op)
++                if (!readiness.canAttempt) {
++                    blocked = readiness
++                    break
++                }
++            }
+             when {
+                 blocked != null -> blocked.reason
+                 scanner.privilegedOperations.isEmpty() && !capabilities.shizukuAuthorized() -> "needs Shizuku"

@@ -1,4 +1,4 @@
-package com.yourpackage.cleanforge.data
+package com.cleanforge.data
 
 enum class Risk { SAFE, ELEVATED, DANGEROUS }
 enum class Confidence { HIGH, MEDIUM, LOW }
