@@ -174,7 +174,7 @@ class SafetyValidator @Inject constructor() {
      *   [telegram, telegram video] hasPrefix("telegram", "telegram video") = false
      */
     private fun List<String>.hasPrefix(vararg prefix: String): Boolean {
-        if (size <= prefix.size) return false
+        if (size != prefix.size + 1) return false
         return prefix.indices.all { index ->
             this[index].equals(prefix[index], ignoreCase = true)
         }

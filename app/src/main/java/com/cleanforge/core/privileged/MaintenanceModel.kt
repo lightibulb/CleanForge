@@ -107,7 +107,7 @@ fun ScanItem.toMaintenanceRequest(knownPackages: Set<String>): MaintenanceReques
     // ROBUST COMPARISON: Normalize both paths for case-insensitive equality check
     // Shared storage (FUSE/sdcardfs) is case-insensitive. Strict == fails on minor casing diffs.
     val targetPath = request.targetPathOrNull() ?: return null
-    if (!targetPath.equals(path, ignoreCase = true)) return null
+    if (targetPath != path) return null
     
     return request
 }
