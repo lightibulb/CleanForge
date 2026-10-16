@@ -40,7 +40,7 @@ class ScanRepositoryTest {
         override fun incompleteReasons(): List<String> = reasons
     }
 
-    private val reads = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA, PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR)
+    private val reads = linkedSetOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA, PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR)
     private fun item(name: String) = scanItem("$ROOT/Download/$name")
 
     private fun caps(decide: (PrivilegedOperation) -> OperationCapability): Capabilities = object : Capabilities {
