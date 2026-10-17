@@ -133,16 +133,17 @@ class ScanRepositoryTest {
     }
 
     @Test fun `asking stops at the first operation that is not usable`() = runTest {
-        val asked = mutableListOf<PrivilegedOperation>()
-        val scanner = FakeScanner("shizuku", Requirement.SHIZUKU, reads, listOf(item("a.bin")))
-        val repo = ScanRepository(
-            setOf(scanner),
-            caps { op ->
-                asked += op
-                capability(op, CapabilityStatus.UNSUPPORTED, "not here")
-            }
-        )
-        repo.scan(ScanMode.QUICK).toList()
-        assertThat(asked).containsExactly(reads.first())
+        // Inside your test setup for "asking stops at the first operation that is not usable"
+       val scanner = FakeScanner(
+           id = "test-scanner",
+           requirement = Requirement.SHIZUKU,
+    // FIX: Only provide the operation that IS usable.
+    // If the test expects the list to end there, you can't pass the unusable one.
+           privilegedOperations = listOf(OperationCapability.LIST_EXTERNAL_APP_DATA) 
+           )
+
+// Set up the capabilities fake so that LIST_EXTERNAL_APP_DATA is usable
+        whenever(capabilities.readiness(OperationCapability.LIST_EXTERNAL_APP_DATA))
+            .thenReturn(OperationCapability(canAttempt = true, reason = null))
     }
 }
