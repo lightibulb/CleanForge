@@ -114,6 +114,7 @@ class ScanRepositoryTest {
     fun `a connected service is not enough, every operation the scanner needs must be usable`() = runTest {
         val op1 = PrivilegedOperation.LIST_EXTERNAL_APP_DATA
         val op2 = PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR
+        
         val scanner = FakeScanner(id = "s1", requirement = Requirement.SHIZUKU, mode = ScanMode.QUICK, privilegedOperations = setOf(op1, op2))
         
         val capabilities = FakeCapabilities().apply {
@@ -186,12 +187,16 @@ class ScanRepositoryTest {
         val op1 = PrivilegedOperation.LIST_EXTERNAL_APP_DATA
         val op2 = PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR
         
-        // Set preserves insertion order, so op1 is strictly checked first
+        // FIX: Using a MutableSet guarantees strict insertion order (op1, then op2)
+        val orderedOps = mutableSetOf<PrivilegedOperation>()
+        orderedOps.add(op1)
+        orderedOps.add(op2)
+        
         val scanner = FakeScanner(
             id = "test-scanner",
             requirement = Requirement.SHIZUKU,
             mode = ScanMode.QUICK,
-            privilegedOperations = setOf(op1, op2) 
+            privilegedOperations = orderedOps 
         )
         val capabilities = FakeCapabilities().apply {
             // op1 is UNAVAILABLE, so the repository's loop will break immediately.
