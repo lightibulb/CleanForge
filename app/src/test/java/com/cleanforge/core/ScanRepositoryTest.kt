@@ -1,6 +1,9 @@
 package com.cleanforge.core
 
 import com.cleanforge.core.backend.Capabilities
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.RiskLevel
 import com.cleanforge.core.model.ScanItem
 import com.cleanforge.core.privileged.CapabilityStatus
 import com.cleanforge.core.privileged.OperationCapability
@@ -12,12 +15,11 @@ import com.cleanforge.data.repository.ScanProgress
 import com.cleanforge.data.repository.ScanRepository
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
-import org.mockito.kotlin.doReturn
-import org.mockito.kotlin.mock
 
 class ScanRepositoryTest {
 
@@ -33,12 +35,13 @@ class ScanRepositoryTest {
         private val shouldThrow: Boolean = false,
         private val incomplete: List<String> = emptyList()
     ) : Scanner {
-        // FIX: Scanner.kt defines this as Flow<List<ScanItem>>
+        // Matches Scanner.kt: fun scan(): Flow<List<ScanItem>>
         override fun scan(): Flow<List<ScanItem>> {
-            if (shouldThrow) throw RuntimeException("Test exception")
+            if (shouldThrow) return flow { throw RuntimeException("Test exception") }
             return flowOf(items)
         }
 
+        // Matches Scanner.kt: fun incompleteReasons(): List<String> (NOT suspend)
         override fun incompleteReasons(): List<String> = incomplete
     }
 
@@ -47,15 +50,17 @@ class ScanRepositoryTest {
         var hasAllFiles = true
         var shizukuAuth = true
 
-        // Map to hold the exact status we want to return for each operation
         val readinessMap = mutableMapOf<PrivilegedOperation, OperationCapability>()
 
+        // Matches Capabilities.kt: fun hasAllFilesAccess(): Boolean (NOT suspend)
         override fun hasAllFilesAccess(): Boolean = hasAllFiles
+        
+        // Matches Capabilities.kt: fun shizukuAuthorized(): Boolean (NOT suspend)
         override fun shizukuAuthorized(): Boolean = shizukuAuth
 
+        // Matches Capabilities.kt: suspend fun readiness(op: PrivilegedOperation): OperationCapability
         override suspend fun readiness(op: PrivilegedOperation): OperationCapability {
             askedOperations.add(op)
-            // Return the mapped value or default to a usable mock
             return readinessMap[op] ?: OperationCapability(
                 operation = op,
                 status = CapabilityStatus.VERIFIED,
@@ -64,15 +69,16 @@ class ScanRepositoryTest {
         }
     }
 
+    // NO MOCKITO. Direct instantiation using the defaults from your ScanItem.kt
     private fun createScanItem(path: String): ScanItem {
-        // Using Mockito here since ScanItem relies on Enums we didn't see (Category, Confidence, Risk)
-        return mock {
-            on { this.path } doReturn path
-            on { this.sizeBytes } doReturn 100L
-            on { this.category } doReturn mock {
-                on { this.ordinal } doReturn 0
-            }
-        }
+        return ScanItem(
+            path = path,
+            sizeBytes = 100L,
+            category = CleaningCategory.APP_CACHE,
+            reasonForFlagging = "Test reason",
+            confidence = ConfidenceLevel.HIGH,
+            risk = RiskLevel.SAFE
+        )
     }
 
     // --- Tests ---
@@ -84,9 +90,11 @@ class ScanRepositoryTest {
 
         val progress = repository.scan(ScanMode.QUICK).toList()
 
-        assertThat(progress).hasSize(2)
+        // A successful scan emits 3 events: Started, ScannerStarted, Finished
+        assertThat(progress).hasSize(3)
         assertThat(progress[0]).isInstanceOf(ScanProgress.Started::class.java)
-        assertThat(progress[1]).isInstanceOf(ScanProgress.Finished::class.java)
+        assertThat(progress[1]).isInstanceOf(ScanProgress.ScannerStarted::class.java)
+        assertThat(progress[2]).isInstanceOf(ScanProgress.Finished::class.java)
     }
 
     @Test
@@ -97,6 +105,7 @@ class ScanRepositoryTest {
 
         val progress = repository.scan(ScanMode.QUICK).toList()
 
+        // Emits: Started, ScannerSkipped, Finished
         assertThat(progress[1]).isInstanceOf(ScanProgress.ScannerSkipped::class.java)
         assertThat((progress[1] as ScanProgress.ScannerSkipped).reason).isEqualTo("needs Shizuku")
     }
@@ -176,22 +185,23 @@ class ScanRepositoryTest {
     fun `asking stops at the first operation that is not usable`() = runTest {
         val op1 = PrivilegedOperation.LIST_EXTERNAL_APP_DATA
         val op2 = PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR
+        
+        // Set preserves insertion order, so op1 is strictly checked first
         val scanner = FakeScanner(
             id = "test-scanner",
             requirement = Requirement.SHIZUKU,
             mode = ScanMode.QUICK,
-            privilegedOperations = setOf(op1, op2) // Both provided
+            privilegedOperations = setOf(op1, op2) 
         )
         val capabilities = FakeCapabilities().apply {
-            // FIX: The FIRST operation MUST be set to NOT usable to stop the loop immediately.
-            // Previously, op1 was usable, so the repository correctly went to check op2.
+            // op1 is UNAVAILABLE, so the repository's loop will break immediately.
             readinessMap[op1] = OperationCapability(op1, CapabilityStatus.UNAVAILABLE, "First op failed")
         }
         val repository = ScanRepository(setOf(scanner), capabilities)
 
         repository.scan(ScanMode.QUICK).toList()
 
-        // Verify that the repository ONLY asked about op1 and stopped. op2 is never asked about.
+        // Verify that ONLY op1 was asked about. op2 is never reached.
         assertThat(capabilities.askedOperations).containsExactly(op1)
     }
 
