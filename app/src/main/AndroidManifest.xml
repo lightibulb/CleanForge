@@ -24,6 +24,7 @@
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:name=".CleanForgeApp"
         android:allowBackup="false"
