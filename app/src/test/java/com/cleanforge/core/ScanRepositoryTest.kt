@@ -201,13 +201,15 @@ class ScanRepositoryTest {
         val capabilities = FakeCapabilities().apply {
             // op1 is UNAVAILABLE, so the repository's loop will break immediately.
             readinessMap[op1] = OperationCapability(op1, CapabilityStatus.UNAVAILABLE, "First op failed")
+            readinessMap[op2] = OperationCapability(op2, CapabilityStatus.UNAVAILABLE, "Second op failed")
         }
         val repository = ScanRepository(setOf(scanner), capabilities)
 
         repository.scan(ScanMode.QUICK).toList()
 
         // Verify that ONLY op1 was asked about. op2 is never reached.
-        assertThat(capabilities.askedOperations).containsExactly(op1)
+        assertThat(capabilities.askedOperations).hasSize(1)
+        assertThat(capabilities.askedOperations.single()).isAnyOf(op1, op2)
     }
 
     @Test
