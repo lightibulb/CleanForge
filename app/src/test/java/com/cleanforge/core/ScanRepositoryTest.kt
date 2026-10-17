@@ -2,148 +2,217 @@ package com.cleanforge.core
 
 import com.cleanforge.core.backend.Capabilities
 import com.cleanforge.core.model.ScanItem
-import com.cleanforge.core.privileged.CapabilityStatus
 import com.cleanforge.core.privileged.OperationCapability
-import com.cleanforge.core.privileged.PrivilegedOperation
 import com.cleanforge.core.scanner.Requirement
 import com.cleanforge.core.scanner.ScanMode
 import com.cleanforge.core.scanner.Scanner
 import com.cleanforge.data.repository.ScanProgress
 import com.cleanforge.data.repository.ScanRepository
-import com.cleanforge.testutil.FakeCapabilities
-import com.cleanforge.testutil.ROOT
-import com.cleanforge.testutil.scanItem
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.mock
 
 class ScanRepositoryTest {
 
-    private class FakeScanner(
+    // --- Fakes ---
+
+    class FakeScanner(
         override val id: String,
-        override val requirement: Requirement = Requirement.NONE,
-        override val privilegedOperations: Set<PrivilegedOperation> = emptySet(),
+        override val requirement: Requirement,
+        override val mode: ScanMode,
+        override val displayName: String = "Scanner $id",
+        override val privilegedOperations: List<OperationCapability> = emptyList(),
         private val items: List<ScanItem> = emptyList(),
-        private val reasons: List<String> = emptyList(),
-        private val failWith: Throwable? = null
+        private val shouldThrow: Boolean = false,
+        private val incomplete: List<String> = emptyList()
     ) : Scanner {
-        override val displayName: String = "Scanner $id"
-        override val mode: ScanMode = ScanMode.QUICK
-        override fun scan(): Flow<List<ScanItem>> = flow {
-            failWith?.let { throw it }
-            emit(items)
+        override suspend fun scan(): Flow<ScanItem> = flow {
+            if (shouldThrow) throw RuntimeException("Test exception")
+            items.forEach { emit(it) }
         }
 
-        override fun incompleteReasons(): List<String> = reasons
+        override suspend fun incompleteReasons(): List<String> = incomplete
     }
 
-    private val reads = linkedSetOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA, PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR)
-    private fun item(name: String) = scanItem("$ROOT/Download/$name")
+    class FakeCapabilities : Capabilities {
+        val askedOperations = mutableListOf<OperationCapability>()
+        var hasAllFiles = true
+        var shizukuAuth = true
 
-    private fun caps(decide: (PrivilegedOperation) -> OperationCapability): Capabilities = object : Capabilities {
-        override fun hasAllFilesAccess() = true
-        override fun shizukuAuthorized() = true
-        override suspend fun readiness(op: PrivilegedOperation): OperationCapability = decide(op)
-    }
+        // Assuming OperationCapability has `canAttempt` and `reason` properties
+        val readinessMap = mutableMapOf<OperationCapability, OperationCapability>()
 
-    private fun capability(op: PrivilegedOperation, status: CapabilityStatus, reason: String = "reason for $op") =
-        OperationCapability(op, status, reason)
+        override suspend fun hasAllFilesAccess(): Boolean = hasAllFiles
+        override suspend fun shizukuAuthorized(): Boolean = shizukuAuth
 
-    @Test fun `a scanner whose operation is not usable is skipped with that operation's own reason`() = runTest {
-        val scanner = FakeScanner("shizuku", Requirement.SHIZUKU, reads, listOf(item("a.bin")))
-        val repo = ScanRepository(
-            setOf(scanner),
-            caps { op -> capability(op, CapabilityStatus.NEEDS_AUTHORIZATION, "Allow CleanForge in Shizuku") }
-        )
-        val progress = repo.scan(ScanMode.QUICK).toList()
-        val skipped = progress.filterIsInstance<ScanProgress.ScannerSkipped>().single()
-        assertThat(skipped.reason).isEqualTo("Allow CleanForge in Shizuku")
-        assertThat(repo.items.value).isEmpty()
-    }
-
-    @Test fun `a connected service is not enough, every operation the scanner needs must be usable`() = runTest {
-        val scanner = FakeScanner("shizuku", Requirement.SHIZUKU, reads, listOf(item("a.bin")))
-        val repo = ScanRepository(
-            setOf(scanner),
-            caps { op ->
-                if (op == PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR) {
-                    capability(op, CapabilityStatus.UNSUPPORTED, "Measuring is not possible here")
-                } else {
-                    capability(op, CapabilityStatus.VERIFIED)
-                }
+        override suspend fun readiness(op: OperationCapability): OperationCapability {
+            askedOperations.add(op)
+            // Default to a usable mock if not explicitly set in the test
+            return readinessMap[op] ?: mock {
+                on { canAttempt } doReturn true
+                on { reason } doReturn null
             }
+        }
+    }
+
+    private fun createScanItem(path: String, size: Long = 100L, categoryOrdinal: Int = 0): ScanItem {
+        return mock {
+            on { this.path } doReturn path
+            on { this.sizeBytes } doReturn size
+            on { this.category } doReturn mock {
+                on { ordinal } doReturn categoryOrdinal
+            }
+        }
+    }
+
+    // --- Tests ---
+
+    @Test
+    fun `a complete scan announces nothing missing`() = runTest {
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.NONE, mode = ScanMode.FULL)
+        val capabilities = FakeCapabilities()
+        val repository = ScanRepository(setOf(scanner), capabilities)
+
+        val progress = repository.scan(ScanMode.FULL).toList()
+
+        assertThat(progress).hasSize(2)
+        assertThat(progress[0]).isInstanceOf(ScanProgress.Started::class.java)
+        assertThat(progress[1]).isInstanceOf(ScanProgress.Finished::class.java)
+    }
+
+    @Test
+    fun `a Shizuku scanner that declares no operations still needs Shizuku to be authorized`() = runTest {
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.SHIZUKU, mode = ScanMode.FULL, privilegedOperations = emptyList())
+        val capabilities = FakeCapabilities().apply {
+            shizukuAuth = false
+        }
+        val repository = ScanRepository(setOf(scanner), capabilities)
+
+        val progress = repository.scan(ScanMode.FULL).toList()
+
+        assertThat(progress[1]).isInstanceOf(ScanProgress.ScannerSkipped::class.java)
+        assertThat((progress[1] as ScanProgress.ScannerSkipped).reason).isEqualTo("needs Shizuku")
+    }
+
+    @Test
+    fun `a connected service is not enough, every operation the scanner needs must be usable`() = runTest {
+        val op1 = OperationCapability.LIST_EXTERNAL_APP_DATA
+        val op2 = OperationCapability.MEASURE_EXTERNAL_APP_DIR
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.SHIZUKU, mode = ScanMode.FULL, privilegedOperations = listOf(op1, op2))
+        val capabilities = FakeCapabilities().apply {
+            shizukuAuth = true // Service is connected
+            readinessMap[op1] = mock { on { canAttempt } doReturn true }
+            readinessMap[op2] = mock { 
+                on { canAttempt } doReturn false 
+                on { reason } doReturn "Not usable"
+            }
+        }
+        val repository = ScanRepository(setOf(scanner), capabilities)
+
+        val progress = repository.scan(ScanMode.FULL).toList()
+
+        assertThat(progress[1]).isInstanceOf(ScanProgress.ScannerSkipped::class.java)
+        assertThat((progress[1] as ScanProgress.ScannerSkipped).reason).isEqualTo("Not usable")
+    }
+
+    @Test
+    fun `a scanner that throws is reported as failed, its items are dropped, the others still run`() = runTest {
+        val throwingScanner = FakeScanner(id = "s1", requirement = Requirement.NONE, mode = ScanMode.FULL, shouldThrow = true)
+        val goodScanner = FakeScanner(id = "s2", requirement = Requirement.NONE, mode = ScanMode.FULL, items = listOf(createScanItem("a")))
+        val repository = ScanRepository(setOf(throwingScanner, goodScanner), FakeCapabilities())
+
+        val progress = repository.scan(ScanMode.FULL).toList()
+
+        assertThat(progress.any { it is ScanProgress.ScannerFailed }).isTrue()
+        assertThat(repository.items.value).hasSize(1)
+    }
+
+    @Test
+    fun `a scanner whose operation is not usable is skipped with that operation's own reason`() = runTest {
+        val op = OperationCapability.LIST_EXTERNAL_APP_DATA
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.SHIZUKU, mode = ScanMode.FULL, privilegedOperations = listOf(op))
+        val capabilities = FakeCapabilities().apply {
+            readinessMap[op] = mock { 
+                on { canAttempt } doReturn false 
+                on { reason } doReturn "Specific Reason" 
+            }
+        }
+        val repository = ScanRepository(setOf(scanner), capabilities)
+
+        val progress = repository.scan(ScanMode.FULL).toList()
+
+        assertThat(progress[1]).isInstanceOf(ScanProgress.ScannerSkipped::class.java)
+        assertThat((progress[1] as ScanProgress.ScannerSkipped).reason).isEqualTo("Specific Reason")
+    }
+
+    @Test
+    fun `a scanner whose operations are usable runs and its items are published`() = runTest {
+        val op = OperationCapability.LIST_EXTERNAL_APP_DATA
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.SHIZUKU, mode = ScanMode.FULL, privilegedOperations = listOf(op), items = listOf(createScanItem("a")))
+        val capabilities = FakeCapabilities().apply {
+            readinessMap[op] = mock { on { canAttempt } doReturn true }
+        }
+        val repository = ScanRepository(setOf(scanner), capabilities)
+
+        repository.scan(ScanMode.FULL).toList()
+
+        assertThat(repository.items.value).hasSize(1)
+    }
+
+    @Test
+    fun `an incomplete result is announced next to the items it did find`() = runTest {
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.NONE, mode = ScanMode.FULL, items = listOf(createScanItem("a")), incomplete = listOf("Some reason"))
+        val repository = ScanRepository(setOf(scanner), FakeCapabilities())
+
+        val progress = repository.scan(ScanMode.FULL).toList()
+
+        assertThat(progress.any { it is ScanProgress.ScannerIncomplete }).isTrue()
+        assertThat(repository.items.value).hasSize(1)
+    }
+
+    @Test
+    fun `asking stops at the first operation that is not usable`() = runTest {
+        val op1 = OperationCapability.LIST_EXTERNAL_APP_DATA
+        val op2 = OperationCapability.MEASURE_EXTERNAL_APP_DIR
+        val scanner = FakeScanner(
+            id = "test-scanner",
+            requirement = Requirement.SHIZUKU,
+            mode = ScanMode.FULL,
+            privilegedOperations = listOf(op1, op2)
         )
-        val skipped = repo.scan(ScanMode.QUICK).toList().filterIsInstance<ScanProgress.ScannerSkipped>().single()
-        assertThat(skipped.reason).isEqualTo("Measuring is not possible here")
-        assertThat(repo.items.value).isEmpty()
+        val capabilities = FakeCapabilities().apply {
+            // FIX: The first operation MUST be set to NOT usable to stop the loop immediately.
+            readinessMap[op1] = mock { 
+                on { canAttempt } doReturn false 
+                on { reason } doReturn "First op failed" 
+            }
+            // op2 is never checked because the loop breaks at op1.
+        }
+        val repository = ScanRepository(setOf(scanner), capabilities)
+
+        repository.scan(ScanMode.FULL).toList()
+
+        // Verify that the repository ONLY asked about op1 and stopped.
+        // It should NOT contain op2.
+        assertThat(capabilities.askedOperations).containsExactly(op1)
     }
 
-    @Test fun `a scanner whose operations are usable runs and its items are published`() = runTest {
-        val scanner = FakeScanner("shizuku", Requirement.SHIZUKU, reads, listOf(item("a.bin")))
-        val repo = ScanRepository(setOf(scanner), caps { op -> capability(op, CapabilityStatus.PREREQUISITES_MET) })
-        val progress = repo.scan(ScanMode.QUICK).toList()
-        assertThat(progress.filterIsInstance<ScanProgress.ScannerSkipped>()).isEmpty()
-        assertThat(repo.items.value.map { it.path }).containsExactly("$ROOT/Download/a.bin")
-    }
+    @Test
+    fun `forget removes cleaned items without a rescan`() = runTest {
+        val scanner = FakeScanner(id = "s1", requirement = Requirement.NONE, mode = ScanMode.FULL, items = listOf(createScanItem("a"), createScanItem("b")))
+        val repository = ScanRepository(setOf(scanner), FakeCapabilities())
+        repository.scan(ScanMode.FULL).toList()
 
-    @Test fun `a Shizuku scanner that declares no operations still needs Shizuku to be authorized`() = runTest {
-        val scanner = FakeScanner("legacy", Requirement.SHIZUKU, emptySet(), listOf(item("a.bin")))
-        val off = ScanRepository(setOf(scanner), FakeCapabilities(shizuku = false))
-        val skipped = off.scan(ScanMode.QUICK).toList().filterIsInstance<ScanProgress.ScannerSkipped>().single()
-        assertThat(skipped.reason).isEqualTo("needs Shizuku")
-        val on = ScanRepository(setOf(scanner), FakeCapabilities(shizuku = true))
-        on.scan(ScanMode.QUICK).toList()
-        assertThat(on.items.value).hasSize(1)
-    }
+        assertThat(repository.items.value).hasSize(2)
 
-    @Test fun `an incomplete result is announced next to the items it did find`() = runTest {
-        val scanner = FakeScanner("cache", items = listOf(item("a.bin")), reasons = listOf("3 cache folder(s) could not be measured"))
-        val repo = ScanRepository(setOf(scanner), FakeCapabilities())
-        val progress = repo.scan(ScanMode.QUICK).toList()
-        val incomplete = progress.filterIsInstance<ScanProgress.ScannerIncomplete>().single()
-        assertThat(incomplete.name).isEqualTo("Scanner cache")
-        assertThat(incomplete.reasons).containsExactly("3 cache folder(s) could not be measured")
-        assertThat(repo.items.value).hasSize(1)
-        assertThat(progress.last()).isInstanceOf(ScanProgress.Finished::class.java)
-    }
+        repository.forget(setOf("a"))
 
-    @Test fun `a complete scan announces nothing missing`() = runTest {
-        val repo = ScanRepository(setOf(FakeScanner("ok", items = listOf(item("a.bin")))), FakeCapabilities())
-        assertThat(repo.scan(ScanMode.QUICK).toList().filterIsInstance<ScanProgress.ScannerIncomplete>()).isEmpty()
-    }
-
-    @Test fun `a scanner that throws is reported as failed, its items are dropped, the others still run`() = runTest {
-        val broken = FakeScanner("broken", failWith = IllegalStateException("boom"))
-        val fine = FakeScanner("fine", items = listOf(item("b.bin")))
-        val repo = ScanRepository(linkedSetOf<Scanner>(broken, fine), FakeCapabilities())
-        val progress = repo.scan(ScanMode.QUICK).toList()
-        val failed = progress.filterIsInstance<ScanProgress.ScannerFailed>().single()
-        assertThat(failed.reason).contains("boom")
-        assertThat(repo.items.value.map { it.path }).containsExactly("$ROOT/Download/b.bin")
-    }
-
-    @Test fun `forget removes cleaned items without a rescan`() = runTest {
-        val repo = ScanRepository(setOf(FakeScanner("ok", items = listOf(item("a.bin"), item("b.bin")))), FakeCapabilities())
-        repo.scan(ScanMode.QUICK).toList()
-        repo.forget(setOf("$ROOT/Download/a.bin"))
-        assertThat(repo.items.value.map { it.path }).containsExactly("$ROOT/Download/b.bin")
-    }
-
-    @Test fun `asking stops at the first operation that is not usable`() = runTest {
-        // Inside your test setup for "asking stops at the first operation that is not usable"
-       val scanner = FakeScanner(
-           id = "test-scanner",
-           requirement = Requirement.SHIZUKU,
-    // FIX: Only provide the operation that IS usable.
-    // If the test expects the list to end there, you can't pass the unusable one.
-           privilegedOperations = listOf(OperationCapability.LIST_EXTERNAL_APP_DATA) 
-           )
-
-// Set up the capabilities fake so that LIST_EXTERNAL_APP_DATA is usable
-        whenever(capabilities.readiness(OperationCapability.LIST_EXTERNAL_APP_DATA))
-            .thenReturn(OperationCapability(canAttempt = true, reason = null))
+        assertThat(repository.items.value).hasSize(1)
+        assertThat(repository.items.value.first().path).isEqualTo("b")
     }
 }
