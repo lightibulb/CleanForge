@@ -22,7 +22,7 @@ class SafeDeleterTest {
 
     private fun dir(vararg parts: String): File = File(tmp.root, parts.joinToString("/")).also { it.mkdirs() }
     private fun write(f: File, text: String = "data") {
-        f.parentFile.mkdirs()
+        f.parentFile?.mkdirs()
         Files.write(f.toPath(), text.toByteArray())
     }
 

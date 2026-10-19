@@ -36,7 +36,9 @@ class PolicyGuardTest {
     assertThat(declared).containsExactly(
         "android.permission.MANAGE_EXTERNAL_STORAGE",
         "android.permission.QUERY_ALL_PACKAGES",
-        "android.permission.KILL_BACKGROUND_PROCESSES"
+        "android.permission.KILL_BACKGROUND_PROCESSES",
+        // Tap feedback only (Haptics.kt). A normal permission: no data access, no network.
+        "android.permission.VIBRATE"
     )
     assertThat(manifest).doesNotContain("android.permission.INTERNET")
     assertThat(manifest).doesNotContain("ACCESS_NETWORK_STATE")

@@ -48,7 +48,7 @@ class ScannerEvidenceTest {
 
     private fun file(rel: String, bytes: ByteArray = "hello world\n".toByteArray(), ageDays: Long = 0): File {
         val f = File(tmp.root, rel)
-        f.parentFile.mkdirs()
+        f.parentFile?.mkdirs()
         Files.write(f.toPath(), bytes)
         f.setLastModified(now - ageDays * day)
         return f

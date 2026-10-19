@@ -16,7 +16,7 @@ class StorageWalkerTest {
     @get:Rule val tmp = TemporaryFolder()
 
     private fun write(f: File, text: String) {
-        f.parentFile.mkdirs()
+        f.parentFile?.mkdirs()
         Files.write(f.toPath(), text.toByteArray())
     }
 

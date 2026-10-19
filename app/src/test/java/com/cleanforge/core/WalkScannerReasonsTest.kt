@@ -20,7 +20,7 @@ class WalkScannerReasonsTest {
     @get:Rule val tmp = TemporaryFolder()
 
     private fun write(f: File, bytes: Int) {
-        f.parentFile.mkdirs()
+        f.parentFile?.mkdirs()
         Files.write(f.toPath(), ByteArray(bytes))
     }
 

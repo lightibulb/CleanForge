@@ -24,6 +24,7 @@
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
+    <!-- VIBRATE: tap feedback only (ui/util/Haptics.kt). A normal permission: no data access, no network. -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:name=".CleanForgeApp"
