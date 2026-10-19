@@ -125,7 +125,11 @@ See [SECURITY.md](SECURITY.md).
 
 ## License
 
-GPL-3.0-or-later *(pending Aman's final decision — see PROJECT_AUDIT.md §13)*
+CleanForge is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0 or later** as published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful, but **WITHOUT ANY WARRANTY**; without even the implied warranty of **MERCHANTABILITY** or **FITNESS FOR A PARTICULAR PURPOSE**. See the [GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.html) for more details.
+
+*Created and owned by **Aman**.*
 
 ---
 
