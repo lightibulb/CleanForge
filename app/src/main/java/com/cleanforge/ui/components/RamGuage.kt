@@ -31,7 +31,7 @@ import com.cleanforge.ui.theme.Fraunces
 fun RamGauge(usedFraction: Float, modifier: Modifier = Modifier) {
     val palette = LocalWarmPalette.current
     var animate by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) { animate = usedFraction }
+    LaunchedEffect(usedFraction) { animate = usedFraction }
     val progress by animateFloatAsState(animate, tween(1400), label = "ramArc")
 
     val pressureColor = when {

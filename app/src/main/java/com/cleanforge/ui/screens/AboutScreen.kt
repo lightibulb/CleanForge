@@ -1,5 +1,7 @@
 package com.cleanforge.ui.screens
 
+import com.cleanforge.ui.components.WarmBtnStyle
+import com.cleanforge.ui.components.WarmButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,8 +34,8 @@ import com.cleanforge.ui.util.rememberHaptics
 
 @Composable
 fun AboutScreen(
-    dark: Boolean,
-    onToggleDark: (Boolean) -> Unit,
+    themeLabel: String,
+    onCycleTheme: () -> Unit,
     onForgeTap: () -> Unit,
 ) {
     val palette = LocalWarmPalette.current
@@ -112,7 +114,7 @@ fun AboutScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Dark mode",
+                    "Theme",
                     fontFamily = Fraunces,
                     fontWeight = FontWeight.Medium,
                     fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp),
@@ -120,12 +122,12 @@ fun AboutScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Muted emerald on a calm neutral night.",
+                    "Follows your phone by default. Tap to switch between System, Light and Dark.",
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.ink2,
                 )
             }
-            WarmSwitch(checked = dark, onCheckedChange = onToggleDark)
+            WarmButton(text = themeLabel, onClick = onCycleTheme, style = WarmBtnStyle.Soft, small = true)
         }
     }
 }

@@ -1,5 +1,12 @@
 package com.cleanforge.ui
 
+import com.cleanforge.data.ThemeMode
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -90,7 +97,7 @@ fun CleanForgeApp(
     val haptics = rememberHaptics()
     val context = LocalContext.current
 
-    val dark by prefs.dark.collectAsStateWithLifecycle(initialValue = false)
+    val themeMode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.System)
     val versesEnabled by prefs.verses.collectAsStateWithLifecycle(initialValue = true)
     val ui by vm.ui.collectAsStateWithLifecycle()
     val ram by ramVm.state.collectAsStateWithLifecycle()
@@ -120,7 +127,7 @@ fun CleanForgeApp(
     }
 
     // Reset scroll on tab change
-    LaunchedEffect(currentScreen) { scrollState.scrollTo(0) }
+    LaunchedEffect(currentScreen) { scrollState.animateScrollTo(0, tween(300)) }
 
     // A finished cleaning report arrives from the engine: give it the success tap.
     val reportReady = ui.cleaning?.report != null
@@ -161,7 +168,18 @@ fun CleanForgeApp(
                 .padding(top = (if (versesEnabled) 250.dp else 108.dp) + topInset)
                 .padding(bottom = 160.dp + bottomInset),
         ) {
-            when (currentScreen) {
+            AnimatedContent(
+                targetState = currentScreen,
+                modifier = Modifier.fillMaxWidth(),
+                transitionSpec = {
+                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (fadeIn(tween(260, delayMillis = 80)) + slideInHorizontally(tween(340)) { dir * it / 10 }) togetherWith
+                        (fadeOut(tween(140)) + slideOutHorizontally(tween(260)) { -dir * it / 10 })
+                },
+                label = "screen",
+            ) { screen ->
+              Column(Modifier.fillMaxWidth()) {
+            when (screen) {
                 Screen.Clean -> CleanScreen(
                     ui = ui,
                     items = quickItems,
@@ -172,6 +190,7 @@ fun CleanForgeApp(
                     onRequestShizukuPermission = vm::requestShizukuPermission,
                     onOpenShizuku = { openShizukuApp(context) },
                     onRecheckShizuku = { vm.forceRecheckShizuku(); toast = "Checking Shizuku…" },
+                    onToggleStorage = vm::toggleStorage,
                     emptyStateVerse = if (versesEnabled) emptyStateVerse else null,
                 )
                 Screen.Review -> ReviewScreen(
@@ -180,6 +199,7 @@ fun CleanForgeApp(
                     onToggle = ::toggleItem,
                     onScan = { haptics(Haptic.Medium); vm.scan(ScanMode.ON_DEMAND) },
                     onCancelScan = vm::cancelScan,
+                    onSelectEverything = { haptics(Haptic.Medium); vm.selectEverythingAndReview(reviewItems) },
                 )
                 Screen.Memory -> {
                     val snap = ram.snapshot
@@ -190,14 +210,17 @@ fun CleanForgeApp(
                         lastFreedLabel = ram.lastClearResult?.note,
                         clearing = ram.isClearing,
                         onClear = { haptics(Haptic.Medium); ramVm.clear() },
+                        processes = ram.processes,
+                        onToggleProcesses = { haptics(Haptic.Light); ramVm.toggleProcesses() },
                     )
                 }
                 Screen.About -> AboutScreen(
-                    dark = dark,
-                    onToggleDark = {
+                    themeLabel = themeMode.name,
+                    onCycleTheme = {
                         scope.launch {
-                            prefs.setDark(!dark)
-                            toast = if (!dark) "Dark mode on" else "Light mode on"
+                            val next = themeMode.next()
+                            prefs.setThemeMode(next)
+                            toast = "Theme: ${next.name}"
                         }
                     },
                     onForgeTap = {
@@ -212,6 +235,8 @@ fun CleanForgeApp(
                         }
                     },
                 )
+            }
+              }
             }
         }
 

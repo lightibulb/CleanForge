@@ -21,6 +21,9 @@ import com.cleanforge.core.shizuku.ShizukuState
 import com.cleanforge.data.repository.ScanProgress
 import com.cleanforge.data.repository.ScanRepository
 import com.cleanforge.domain.usecase.ExecuteCleaningPlanUseCase
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.domain.usecase.StorageBreakdown
+import com.cleanforge.domain.usecase.StorageBreakdownUseCase
 import com.cleanforge.domain.usecase.ScanDeviceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -43,6 +46,14 @@ data class CleaningUi(
     val stopping: Boolean = false
 )
 
+/** The storage card behind the hero: loaded when it is opened. */
+data class StorageUi(
+    val expanded: Boolean = false,
+    val loading: Boolean = false,
+    val breakdown: StorageBreakdown? = null,
+    val error: String? = null
+)
+
 data class CleanUiState(
     val freeBytes: Long = 0L,
     val totalBytes: Long = 0L,
@@ -55,6 +66,9 @@ data class CleanUiState(
     /** True once a scan has finished, so "no results" can be told apart from "never scanned". */
     val scanned: Boolean = false,
     val notices: List<String> = emptyList(),
+    /** One neutral line per scanner that ran: what it found, so "nothing" can be told apart from "did not run". */
+    val scanSummary: List<String> = emptyList(),
+    val storage: StorageUi = StorageUi(),
     val items: List<ScanItem> = emptyList(),
     val selected: Set<String> = emptySet(),
     val plan: CleaningPlan? = null,
@@ -74,7 +88,8 @@ class CleanViewModel @Inject constructor(
     private val executePlan: ExecuteCleaningPlanUseCase,
     private val shizuku: ShizukuManager,
     private val capabilities: Capabilities,
-    private val registry: CapabilityRegistry
+    private val registry: CapabilityRegistry,
+    private val storageBreakdown: StorageBreakdownUseCase
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CleanUiState())
@@ -140,9 +155,10 @@ class CleanViewModel @Inject constructor(
     fun scan(mode: ScanMode) {
         if (_ui.value.busy) return
         refreshDevice()
-        _ui.update { it.copy(scanning = true, scanLabel = "Starting…", notices = emptyList()) }
+        _ui.update { it.copy(scanning = true, scanLabel = "Starting…", notices = emptyList(), scanSummary = emptyList()) }
         scanJob = viewModelScope.launch {
             val notices = ArrayList<String>()
+            var summary: List<String> = emptyList()
             var finished = false
             try {
                 scanDevice(mode).collect { p ->
@@ -153,7 +169,13 @@ class CleanViewModel @Inject constructor(
                         is ScanProgress.ScannerFailed -> notices += "${p.name} failed: ${p.reason}"
                         is ScanProgress.ScannerIncomplete ->
                             notices += "${p.name} is incomplete: ${p.reasons.joinToString("; ")}"
-                        is ScanProgress.Finished -> finished = true
+                        is ScanProgress.Finished -> {
+                            finished = true
+                            summary = p.summaries.map { s ->
+                                if (s.count == 0) "${s.name}: nothing found"
+                                else "${s.name}: ${s.count} found (${formatBytes(s.bytes)})"
+                            }
+                        }
                         else -> Unit
                     }
                 }
@@ -168,9 +190,11 @@ class CleanViewModel @Inject constructor(
                         scanning = false,
                         scanLabel = "",
                         scanned = it.scanned || finished,
-                        notices = notices.toList()
+                        notices = notices.toList(),
+                        scanSummary = summary
                     )
                 }
+                if (_ui.value.storage.expanded) loadStorage() // the caches slice depends on the scan
             }
         }
     }
@@ -195,6 +219,45 @@ class CleanViewModel @Inject constructor(
     }
 
     // ---------- VALIDATE + PLAN -> USER CONFIRMATION ----------
+
+    /**
+     * "Select everything" for the Review tab: ticks every suggestion shown (keeping the oldest copy of each duplicate
+     * group, since the plan refuses to delete all copies) and opens the normal confirmation, which lists every path.
+     */
+    fun selectEverythingAndReview(candidates: List<ScanItem>) {
+        if (_ui.value.busy || candidates.isEmpty()) return
+        val keepers = HashSet<String>()
+        candidates.filter { it.category == CleaningCategory.DUPLICATE && it.groupId != null }
+            .groupBy { it.groupId }
+            .values
+            .forEach { group -> group.minByOrNull { it.lastModified }?.let { keepers += it.path } }
+        val paths = candidates.map { it.path }.filterTo(HashSet<String>()) { it !in keepers }
+        _ui.update { it.copy(selected = paths) }
+        requestClean()
+    }
+
+    fun toggleStorage() {
+        val open = !_ui.value.storage.expanded
+        _ui.update { it.copy(storage = it.storage.copy(expanded = open)) }
+        if (open) loadStorage()
+    }
+
+    fun loadStorage() {
+        val s = _ui.value
+        if (s.storage.loading) return
+        _ui.update { it.copy(storage = it.storage.copy(loading = true, error = null)) }
+        viewModelScope.launch {
+            try {
+                val used = (s.totalBytes - s.freeBytes).coerceAtLeast(0L)
+                val breakdown = storageBreakdown(used, _ui.value.items)
+                _ui.update { it.copy(storage = it.storage.copy(loading = false, breakdown = breakdown)) }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                _ui.update { it.copy(storage = it.storage.copy(loading = false, error = t.message ?: "Could not read storage")) }
+            }
+        }
+    }
 
     fun requestClean() {
         val s = _ui.value

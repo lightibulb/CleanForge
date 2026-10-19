@@ -225,4 +225,19 @@ class ScanRepositoryTest {
         assertThat(repository.items.value).hasSize(1)
         assertThat(repository.items.value.first().path).isEqualTo("b")
     }
+
+    @Test
+    fun `the finished event says what each scanner found`() = runTest {
+        val caches = FakeScanner(
+            id = "s1", requirement = Requirement.NONE, mode = ScanMode.QUICK, displayName = "Caches",
+            items = listOf(createScanItem("a"), createScanItem("b"))
+        )
+        val thumbs = FakeScanner(id = "s2", requirement = Requirement.NONE, mode = ScanMode.QUICK, displayName = "Thumbnails")
+        val repository = ScanRepository(linkedSetOf<Scanner>(caches, thumbs), FakeCapabilities())
+
+        val finished = repository.scan(ScanMode.QUICK).toList().filterIsInstance<ScanProgress.Finished>().single()
+
+        assertThat(finished.summaries.map { it.name to it.count }).containsExactly("Caches" to 2, "Thumbnails" to 0).inOrder()
+        assertThat(finished.summaries.first().bytes).isEqualTo(200L)
+    }
 }

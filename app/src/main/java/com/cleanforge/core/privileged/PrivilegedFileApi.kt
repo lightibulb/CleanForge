@@ -39,6 +39,7 @@ data class StatReply(val status: ReplyStatus, val stat: FsStat? = null)
 data class ListReply(val status: ReplyStatus, val names: List<String> = emptyList(), val truncated: Boolean = false)
 
 data class SizeReply(val status: ReplyStatus, val size: SizeResult? = null)
+data class ProcessListReply(val status: ReplyStatus, val entries: List<ProcessMemoryEntry> = emptyList())
 
 /**
  * The transport broke: the service died, the call could not be delivered, or the reply was unusable.
@@ -78,4 +79,6 @@ interface PrivilegedFileApi {
      * Protects against a logic bug in the app, not against a hostile app.
      */
     @Throws(TransportException::class) fun setProtectedPackages(packages: Collection<String>): Int
+    /** Running app processes and their memory (read-only). Older services without this call answer with an error. */
+    @Throws(TransportException::class) fun processMemory(): ProcessListReply = ProcessListReply(ReplyStatus.REFUSED)
 }

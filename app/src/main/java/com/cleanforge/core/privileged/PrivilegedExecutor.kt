@@ -30,6 +30,10 @@ interface PrivilegedExecutor {
     suspend fun list(path: String): FsResult<DirListing>
     suspend fun measure(path: String): FsResult<SizeResult>
     suspend fun execute(request: MaintenanceRequest): MaintenanceResult
+
+    /** Running app processes and their memory. Needs Shizuku; every other outcome says why there is no list. */
+    suspend fun processMemory(): FsResult<List<ProcessMemoryEntry>> =
+        FsResult.Unavailable("Not supported by this executor")
 }
 
 data class ExecutionPolicy(
@@ -68,6 +72,18 @@ class DefaultPrivilegedExecutor(
                 ReplyStatus.REFUSED -> FsResult.Denied("Blocked by CleanForge's path rules")
                 ReplyStatus.OS_DENIED -> FsResult.Denied("The system refused access for the Shizuku shell")
                 ReplyStatus.FAILED -> FsResult.Failed("The Shizuku service could not examine this path")
+            }
+        }
+
+    override suspend fun processMemory(): FsResult<List<ProcessMemoryEntry>> =
+        read<List<ProcessMemoryEntry>>(PrivilegedOperation.LIST_EXTERNAL_APP_DATA, policy.listTimeoutMs) { api ->
+            val r = api.processMemory()
+            when (r.status) {
+                ReplyStatus.OK -> FsResult.Ok(r.entries)
+                ReplyStatus.NOT_FOUND -> FsResult.NotFound
+                ReplyStatus.REFUSED -> FsResult.Denied("The Shizuku service is too old for this: reopen CleanForge after updating")
+                ReplyStatus.OS_DENIED -> FsResult.Denied("Android refused to show other apps' memory use")
+                ReplyStatus.FAILED -> FsResult.Failed("The service could not read process memory")
             }
         }
 

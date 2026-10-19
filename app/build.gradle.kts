@@ -30,7 +30,7 @@ android {
         applicationId = "com.cleanforge"
         minSdk = 30
         targetSdk = 35
-        versionCode = 3
+        versionCode = 4
         versionName = "0.2.1"
     }
 

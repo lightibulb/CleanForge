@@ -1,5 +1,11 @@
 package com.cleanforge.ui.components
 
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.navigationBarsPadding
+import android.view.ViewGroup
+import android.view.Gravity
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -58,8 +64,18 @@ fun WarmSheet(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        // A Compose dialog window wraps its content and is centred by default; on some phones that left the sheet
+        // halfway up the screen. Make the window fill the screen and anchor the sheet to the bottom.
+        val view = LocalView.current
+        SideEffect {
+            (view.parent as? DialogWindowProvider)?.window?.let { w ->
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                w.setGravity(Gravity.BOTTOM)
+                w.setDimAmount(0f) // the Warm scrim below does the dimming
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -77,6 +93,7 @@ fun WarmSheet(
                     .graphicsLayer { translationY = (1f - progress) * 60.dp.toPx() }
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                     .background(palette.surface)
+                    .navigationBarsPadding()
                     .padding(horizontal = 24.dp)
                     .padding(top = 12.dp, bottom = 28.dp)
                     .verticalScroll(rememberScrollState())

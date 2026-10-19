@@ -18,6 +18,9 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** What a finished scanner found, so "nothing found" can be told apart from "did not run". */
+data class ScannerSummary(val name: String, val count: Int, val bytes: Long)
+
 sealed interface ScanProgress {
     data class Started(val totalScanners: Int) : ScanProgress
     data class ScannerStarted(val name: String, val index: Int, val total: Int) : ScanProgress
@@ -25,7 +28,8 @@ sealed interface ScanProgress {
     data class ScannerFailed(val name: String, val reason: String) : ScanProgress
     /** The scanner ran, but its result is incomplete (see [Scanner.incompleteReasons]). Not the same as "found nothing". */
     data class ScannerIncomplete(val name: String, val reasons: List<String>) : ScanProgress
-    data class Finished(val totalItems: Int) : ScanProgress
+    /** [summaries]: one entry per scanner that RAN (skipped and failed ones are reported by their own events). */
+    data class Finished(val totalItems: Int, val summaries: List<ScannerSummary> = emptyList()) : ScanProgress
 }
 
 @Singleton
@@ -52,6 +56,7 @@ class ScanRepository @Inject constructor(
         scanMutex.withLock {
             val selected = scanners.filter { it.mode == mode }
             emit(ScanProgress.Started(selected.size))
+            val summaries = ArrayList<ScannerSummary>()
 
             for ((index, scanner) in selected.withIndex()) {
                 val missing = missing(scanner)
@@ -68,9 +73,15 @@ class ScanRepository @Inject constructor(
                 var reasons: List<String> = emptyList()
 
                 try {
-                    scanner.scan().collect { found += it }
-                    results.update { it + (scanner.id to found.toList()) }
+                    scanner.scan().collect { batch ->
+                        found += batch
+                        // Show results as they arrive: a slow scanner must not look like an empty one.
+                        results.update { it + (scanner.id to found.toList()) }
+                        publish()
+                    }
+                    results.update { it + (scanner.id to found.toList()) } // also replaces old results with "none"
                     reasons = scanner.incompleteReasons()
+                    summaries += ScannerSummary(scanner.displayName, found.size, found.sumOf { it.sizeBytes })
                 } catch (ce: CancellationException) {
                     throw ce
                 } catch (t: Throwable) {
@@ -82,7 +93,7 @@ class ScanRepository @Inject constructor(
                 if (reasons.isNotEmpty()) emit(ScanProgress.ScannerIncomplete(scanner.displayName, reasons))
             }
 
-            emit(ScanProgress.Finished(_items.value.size))
+            emit(ScanProgress.Finished(_items.value.size, summaries))
         }
     }
 

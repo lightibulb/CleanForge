@@ -33,7 +33,9 @@ class FileServiceCore(
     private val walkLimits: WalkLimits = WalkLimits(),
     private val maxNames: Int = MAX_NAMES,
     /* Budget for the total length of names in one listing, to stay far below the 1 MB binder transaction limit. */
-    private val maxListChars: Int = MAX_LIST_CHARS
+    private val maxListChars: Int = MAX_LIST_CHARS,
+    /* Where process facts come from (the real /proc inside the service; a fake in tests). */
+    private val proc: ProcSource = AndroidProcSource
 ) {
     private val walker = StorageWalker(fs)
     @Volatile private var cancelRequested = false
@@ -52,6 +54,9 @@ class FileServiceCore(
             FsProbe.Error -> StatReply(ReplyStatus.FAILED)
         }
     }
+
+    /** Read-only list of running app processes and their memory. No argument, so nothing for a caller to steer. */
+    fun processMemory(): Array<String> = ProcessMemoryReader.encode(ProcessMemoryReader.read(proc))
 
     fun list(path: String?): ListReply {
         val p = path ?: return ListReply(ReplyStatus.REFUSED)

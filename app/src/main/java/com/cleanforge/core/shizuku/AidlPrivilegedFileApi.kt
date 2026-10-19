@@ -52,4 +52,10 @@ class AidlPrivilegedFileApi(private val service: IFileService) : PrivilegedFileA
 
     override fun setProtectedPackages(packages: Collection<String>): Int =
         guarded { service.setProtectedPackages(packages.toTypedArray()) }
+
+    override fun processMemory(): com.cleanforge.core.privileged.ProcessListReply =
+        com.cleanforge.core.privileged.ProcessListReply(
+            com.cleanforge.core.privileged.ReplyStatus.OK,
+            com.cleanforge.core.privileged.ProcessMemoryReader.decode(guarded { service.processMemoryEx() })
+        )
 }

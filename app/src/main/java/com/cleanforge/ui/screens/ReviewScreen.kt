@@ -23,6 +23,7 @@ fun ReviewScreen(
     onToggle: (String) -> Unit,
     onScan: () -> Unit,
     onCancelScan: () -> Unit,
+    onSelectEverything: () -> Unit,
 ) {
     val palette = LocalWarmPalette.current
 
@@ -55,9 +56,25 @@ fun ReviewScreen(
             }
             WarmButton(text = "Stop", onClick = onCancelScan, style = WarmBtnStyle.Outline, small = true)
         }
+        if (items.isNotEmpty() && !ui.busy) {
+            Spacer(Modifier.height(16.dp))
+            WarmButton(
+                text = "Select everything & delete…",
+                onClick = onSelectEverything,
+                style = WarmBtnStyle.Danger,
+                small = true,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Ticks every suggestion below (one copy of each duplicate stays). You still see every path and confirm before anything is removed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.ink3,
+            )
+        }
     }
 
     Notices(ui.notices) // these were passed in before but never shown
+    ScanSummary(ui.scanSummary)
 
     ResultsSection(
         items = items,

@@ -1,5 +1,7 @@
 package com.cleanforge
 
+import com.cleanforge.data.ThemeMode
+import androidx.compose.foundation.isSystemInDarkTheme
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -25,7 +27,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val prefs = remember { Preferences(context) }
-            val dark by prefs.dark.collectAsStateWithLifecycle(initialValue = false)
+            val mode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.System)
+            val dark = when (mode) {
+                ThemeMode.System -> isSystemInDarkTheme()
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
 
             // Bar icons must contrast with the theme the user chose in About (they were fixed to "light").
             DisposableEffect(dark) {

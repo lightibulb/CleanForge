@@ -1,5 +1,7 @@
 package com.cleanforge.ui.components
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -81,6 +83,12 @@ fun WarmDock(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp)
+                .shadow(
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(999.dp),
+                    ambientColor = Color(0x33000000),
+                    spotColor = Color(0x55000000),
+                )
                 .clip(RoundedCornerShape(999.dp))
                 .background(palette.dockBg)
                 .border(1.dp, palette.dockBorder, RoundedCornerShape(999.dp)),

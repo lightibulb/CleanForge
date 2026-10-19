@@ -53,4 +53,10 @@ interface IFileService {
 
     /** Replaces the installed-apps guard for tree deletions. Returns names accepted, or -1 if the list was rejected. */
     int setProtectedPackages(in String[] packages) = 12;
+
+    /**
+     * Read-only: one line per running APP process (uid >= 10000), "pid|uid|rssKb|processName". Takes no argument, so
+     * there is nothing for the caller to point at. Used for the "what is using memory" list.
+     */
+    String[] processMemoryEx() = 13;
 }

@@ -1,5 +1,9 @@
 package com.cleanforge.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -40,11 +44,17 @@ fun ItemRow(item: ScanItem, selected: Boolean, onToggle: () -> Unit) {
     val palette = LocalWarmPalette.current
     val haptics = rememberHaptics()
     val interaction = remember { MutableInteractionSource() }
+    val rowBg by animateColorAsState(
+        targetValue = if (selected) palette.clayTint else androidx.compose.ui.graphics.Color.Transparent,
+        animationSpec = tween(220),
+        label = "rowBg",
+    )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (selected) palette.clayTint else androidx.compose.ui.graphics.Color.Transparent)
+            .animateContentSize(tween(220))
+            .background(rowBg)
             .clickable(interactionSource = interaction, indication = null) {
                 haptics(if (selected) Haptic.Tick else Haptic.Light)
                 onToggle()

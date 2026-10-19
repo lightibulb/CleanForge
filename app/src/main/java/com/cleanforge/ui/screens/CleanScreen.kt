@@ -1,5 +1,10 @@
 package com.cleanforge.ui.screens
 
+import com.cleanforge.ui.components.StorageBreakdownCard
+import androidx.compose.ui.zIndex
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +50,7 @@ fun CleanScreen(
     onRequestShizukuPermission: () -> Unit,
     onOpenShizuku: () -> Unit,
     onRecheckShizuku: () -> Unit,
+    onToggleStorage: () -> Unit,
     emptyStateVerse: Verse?,
 ) {
     val palette = LocalWarmPalette.current
@@ -53,7 +59,11 @@ fun CleanScreen(
     val usedFraction = ui.usedFraction
 
     // Storage hero
+    // Drawn above the breakdown card, which slides down from behind it when the hero is tapped.
     WarmCard(
+        modifier = Modifier
+            .zIndex(1f)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onToggleStorage() },
         bg = palette.heroSurface,
         border = palette.line,
         radius = 28.dp,
@@ -86,7 +96,15 @@ fun CleanScreen(
                 )
             }
         }
-    }
+            Spacer(Modifier.height(12.dp))
+        Text(
+            if (ui.storage.expanded) "Tap to hide the breakdown ▴" else "Tap for a breakdown by type ▾",
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.ink3,
+        )
+}
+
+    StorageBreakdownCard(storage = ui.storage, onRetry = onToggleStorage)
 
     Spacer(Modifier.height(10.dp))
 
@@ -139,6 +157,7 @@ fun CleanScreen(
     }
 
     Notices(ui.notices)
+    ScanSummary(ui.scanSummary)
 
     // Results
     ResultsSection(
@@ -315,5 +334,24 @@ fun ResultsSection(
                 onToggle = { onToggle(item.path) },
             )
         }
+    }
+}
+
+/** Neutral lines for the scanners that ran: what each found, so an empty list is explained. */
+@Composable
+internal fun ScanSummary(lines: List<String>) {
+    if (lines.isEmpty()) return
+    val palette = LocalWarmPalette.current
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(palette.surface2)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("What the scan checked", style = MaterialTheme.typography.labelSmall, color = palette.ink3)
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.ink2) }
     }
 }

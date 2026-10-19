@@ -41,6 +41,8 @@ class ShizukuFileService : IFileService.Stub() {
 
     override fun setProtectedPackages(packages: Array<String>?): Int = core.setProtectedPackages(packages)
 
+    override fun processMemoryEx(): Array<String> = core.processMemory()
+
     // ---- original methods, kept so an older app build still works; they cannot say WHY there is no value ----
 
     override fun lstat(path: String?): LongArray? {
