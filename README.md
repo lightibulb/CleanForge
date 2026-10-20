@@ -7,6 +7,7 @@ No ads. No subscription. No telemetry, analytics or accounts.
 No internet permission. No root.
 
 ---
+[![Download APK](https://img.shields.io/badge/Download-Android_APK-2ea44f?logo=android&logoColor=white)](https://github.com/lightibulb/CleanForge/releases/download/v2.5.4/CleanForge-debug.apk)
 
 ## Features
 
