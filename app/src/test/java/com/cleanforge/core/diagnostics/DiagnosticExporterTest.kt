@@ -23,7 +23,7 @@ class DiagnosticExporterTest {
 
     @Test fun `text contains every section`() {
         val t = DiagnosticExporter.toText(report)
-        assertThat(t).contains("Diagnostic report")
+        assertThat(t).contains("diagnostic report")
         assertThat(t).contains("== Storage ==")
         assertThat(t).contains("== Permissions ==")
         assertThat(t).contains("== Scanners ==")
