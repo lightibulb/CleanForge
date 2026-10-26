@@ -22,7 +22,7 @@ jobs:
       - run: chmod +x ./gradlew
       - name: Unit tests
         run: ./gradlew --no-daemon clean :app:testDebugUnitTest
-      - name: Lint (strict: errors fail the build)
+      - name: "Lint (strict: errors fail the build)"
         run: ./gradlew --no-daemon :app:lintDebug -PstrictLint
       - name: Build debug and release
         run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
