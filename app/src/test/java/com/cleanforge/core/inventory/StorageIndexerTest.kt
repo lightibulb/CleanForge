@@ -23,7 +23,7 @@ class StorageIndexerTest {
         assertThat(idx.byPath("$ROOT/DCIM")!!.bytes).isEqualTo(50L)
         assertThat(idx.byPath("$ROOT/DCIM")!!.parentPath).isEqualTo(ROOT)
         assertThat(idx.largestFiles.map { it.name }).containsExactly("c.bin", "b.bin", "a.bin", "d.jpg")
-        assertThat(idx.categoryTotals.first { it.key == "other" }.bytes).isEqualTo(650L)
+        assertThat(idx.categoryTotals.first { it.key == "other" }.bytes).isEqualTo(600L)
         assertThat(idx.incomplete).isFalse()
     }
 

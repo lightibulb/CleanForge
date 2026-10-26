@@ -23,9 +23,11 @@ class DiagnosticExporterTest {
 
     @Test fun `text contains every section`() {
         val t = DiagnosticExporter.toText(report)
-        listOf("Diagnostic report", "== Storage ==", "== Permissions ==", "== Scanners ==", "== Notices ==").forEach {
-            assertThat(t).contains(it)
-        }
+        assertThat(t).contains("Diagnostic report")
+        assertThat(t).contains("== Storage ==")
+        assertThat(t).contains("== Permissions ==")
+        assertThat(t).contains("== Scanners ==")
+        assertThat(t).contains("== Notices ==")
         assertThat(t).contains("Caches: ran")
     }
 

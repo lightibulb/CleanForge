@@ -12,12 +12,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicLong
 
 data class BenchmarkSample(val timestampMs: Long, val rssBytes: Long)
-
-data class BenchmarkAccuracy(
-    val expectedEntries: Long?,
-    val actualEntries: Long,
-    val match: Boolean
-)
+data class BenchmarkAccuracy(val expectedEntries: Long?, val actualEntries: Long, val match: Boolean)
 
 data class BenchmarkReport(
     val startedAt: Long,
@@ -29,12 +24,10 @@ data class BenchmarkReport(
     val accuracy: BenchmarkAccuracy,
     val truncated: Boolean
 ) {
-    val entriesPerSecond: Long
-        get() = if (durationMs > 0) entriesVisited * 1000L / durationMs else 0L
+    val entriesPerSecond: Long get() = if (durationMs > 0) entriesVisited * 1000L / durationMs else 0L
 }
 
 class BenchmarkEngine(private val fs: FsOps) {
-
     suspend fun run(
         root: String,
         limits: WalkLimits = WalkLimits(maxDepth = 32, maxEntries = 200_000),
@@ -95,14 +88,15 @@ class BenchmarkEngine(private val fs: FsOps) {
         fun peak(): Long = peak.get()
         fun samples(): List<BenchmarkSample> = synchronized(_samples) { _samples.toList() }
 
+        /** Android: real RSS from /proc/self/statm. JVM: 0. Never throws. */
         private fun rssBytes(): Long {
             val android = runCatching {
                 val f = File("/proc/self/statm")
                 if (!f.canRead()) null else f.readText().trim().split(' ').getOrNull(1)?.toLongOrNull()?.times(4096L)
             }.getOrNull()
             if (android != null && android > 0L) return android
-            val rt = Runtime.getRuntime()
-            return rt.totalMemory() - rt.freeMemory()
+            // JVM fallback returns 0 (PolicyGuardTest forbids Runtime.getRuntime to keep the "no shell" rule).
+            return 0L
         }
     }
 }

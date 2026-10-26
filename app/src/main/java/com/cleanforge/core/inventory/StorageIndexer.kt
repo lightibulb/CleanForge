@@ -62,6 +62,8 @@ class StorageIndexer(
                 if (e.stat.type != FsType.FILE) {
                     if (e.path.count { it == '/' } - rootLevel <= maxDepth) {
                         ensureDir(aggs, rootPath, e.path, e.stat.mtimeMs, maxDirs) { dirsCapped = true }
+                    } else {
+                        truncated = true
                     }
                     continue
                 }
@@ -74,6 +76,8 @@ class StorageIndexer(
                             a.fileCount += 1
                             if (e.stat.mtimeMs > a.newestMtime) a.newestMtime = e.stat.mtimeMs
                         }
+                    } else {
+                        truncated = true
                     }
                     parent = parent.substringBeforeLast('/')
                     parentDepth--

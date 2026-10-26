@@ -389,7 +389,7 @@ class CleaningEngineTest {
         assertThat((events[1] as CleaningProgress.ItemStarted).item.path).isEqualTo(a.path)
     }
 
-    @Test fun `an unexpected exception costs one item, not the whole run and its report`() = runTest {
+    @Test fun `an_unexpected_exception_costs_one_item_not_the_whole_run_and_its_report`() = runTest {
         val p1 = "$ROOT/Download/a.bin"
         val p2 = "$ROOT/Download/b.bin"
         fs.file(p1, size = 10)
