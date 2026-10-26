@@ -1,0 +1,4000 @@
+        val expected = FsStat(FsType.DIRECTORY, 0L, 0L, dev, ino)
+        return SafeDeleter(fs, isCancelled = { cancelRequested }).delete(path, mode, expected)
+    }
+
+    // ------------------------------------------------------------------ internals
+    private fun refused(why: String) = DeleteResult(DeleteStatus.REFUSED, detail = why)
+    
+    private fun readGate(path: String): ReplyStatus {
+        if (!PathRules.isServiceReadable(path)) return ReplyStatus.REFUSED
+        return ancestorsStatus(path)
+    }
+
+    /** Every proper ancestor below the storage root must be a real directory. */
+    private fun ancestorsStatus(path: String): ReplyStatus {
+        val c = try {
+            PathRules.componentsBelowRoot(path)
+        } catch (e: PathException) {
+            return ReplyStatus.REFUSED
+        }
+        var current = PathRules.ROOT
+        for (i in 0 until c.size - 1) {
+            current = "$current/${c[i]}"
+            when (val r = fs.probe(current)) {
+                is FsProbe.Found -> if (r.stat.type != FsType.DIRECTORY) return ReplyStatus.REFUSED
+                FsProbe.Missing -> return ReplyStatus.NOT_FOUND
+                FsProbe.Denied -> return ReplyStatus.OS_DENIED
+                FsProbe.Error -> return ReplyStatus.FAILED
+            }
+        }
+        return ReplyStatus.OK
+    }
+
+    companion object {
+        const val MAX_NAMES = 20_000
+        const val MAX_LIST_CHARS = 120_000
+        const val MAX_PROTECTED = 5_000
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/memory/RamSnapshot.kt -----
+package com.cleanforge.core.memory
+
+/** Coarse signal for the UI. Based on AVAILABLE memory, not "used", because Android caches intentionally. */
+enum class MemoryPressure { LOW, NORMAL, HIGH, CRITICAL }
+
+/**
+ * One honest reading of system memory. Source of truth is /proc/meminfo.
+ * Nothing here claims that "high usage" is bad by itself.
+ */
+data class RamSnapshot(
+    val totalBytes: Long,
+    val availableBytes: Long,
+    val freeBytes: Long,
+    val buffersBytes: Long,
+    val cachedBytes: Long,
+    val swapTotalBytes: Long,
+    val swapFreeBytes: Long,
+    val timestamp: Long
+) {
+    /** Memory the system cannot hand out right now. */
+    val usedBytes: Long get() = (totalBytes - availableBytes).coerceAtLeast(0L)
+
+    val usedFraction: Float get() = if (totalBytes > 0) usedBytes.toFloat() / totalBytes else 0f
+    val availableFraction: Float get() = if (totalBytes > 0) availableBytes.toFloat() / totalBytes else 0f
+
+    val pressure: MemoryPressure
+        get() = when {
+            availableFraction <= 0.05f -> MemoryPressure.CRITICAL
+            availableFraction <= 0.12f -> MemoryPressure.HIGH
+            availableFraction <= 0.30f -> MemoryPressure.NORMAL
+            else -> MemoryPressure.LOW
+        }
+}
+----- file: ./app/src/main/java/com/cleanforge/core/memory/BackgroundProcessKiller.kt -----
+package com.cleanforge.core.memory
+
+import android.app.ActivityManager
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+
+/**
+ * The one place that asks Android to stop background processes.
+ * A seam so the use case is testable without the framework.
+ */
+fun interface BackgroundProcessKiller {
+
+    /**
+     * Asks Android to stop the BACKGROUND processes of [packageName].
+     * This is the same kind of trim Android does under memory pressure; it is not a force-stop.
+     *
+     * Returns true if a request was sent.
+     * Returns false if the package was deliberately skipped or the OS refused the request.
+     */
+    fun kill(packageName: String): Boolean
+}
+
+/**
+ * Skips CleanForge itself and every system app.
+ * Stopping system components usually only makes Android reload them.
+ * If the app type cannot be determined, it is skipped fail-closed.
+ */
+class AndroidBackgroundProcessKiller(context: Context) : BackgroundProcessKiller {
+
+    private val appContext = context.applicationContext
+    private val activityManager: ActivityManager? =
+        appContext.getSystemService(ActivityManager::class.java)
+    private val packageManager: PackageManager = appContext.packageManager
+
+    override fun kill(packageName: String): Boolean {
+        val am = activityManager ?: return false
+
+        if (packageName == appContext.packageName) return false
+        if (isSystemOrUnknown(packageName)) return false
+
+        return try {
+            am.killBackgroundProcesses(packageName)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun isSystemOrUnknown(packageName: String): Boolean = try {
+        val flags = packageManager.getApplicationInfo(packageName, 0).flags
+        (flags and ApplicationInfo.FLAG_SYSTEM) != 0
+    } catch (e: Exception) {
+        true
+    }
+}
+----- file: ./app/src/main/java/com/cleanforge/core/memory/MemInfoParser.kt -----
+package com.cleanforge.core.memory
+
+/**
+ * Pure parser for /proc/meminfo. No I/O here so it is trivially testable.
+ *
+ * Format reminder:
+ *   MemTotal:        3925568 kB
+ *   MemAvailable:    1456784 kB
+ *   ...
+ * Values are in kB. HugePages_* are counts (no kB) and are ignored.
+ */
+object MemInfoParser {
+
+    private const val PROC_MEMINFO = "/proc/meminfo"
+
+    fun parse(content: String, timestamp: Long): RamSnapshot? {
+        val bytes = mutableMapOf<String, Long>()
+
+        for (line in content.lineSequence()) {
+            val colon = line.indexOf(':')
+            if (colon <= 0) continue
+
+            val key = line.substring(0, colon).trim()
+            var value = line.substring(colon + 1).trim()
+
+            // Strip the trailing "kB" if present.
+            val multiplier = if (value.endsWith("kB")) {
+                value = value.removeSuffix("kB").trim()
+                1024L
+            } else {
+                1L
+            }
+
+            val number = value.toLongOrNull() ?: continue
+            bytes[key] = number * multiplier
+        }
+
+        val total = bytes["MemTotal"] ?: return null
+        if (total <= 0L) return null // a zero-byte "snapshot" would read as real data; unknown is not zero
+
+        val free = bytes["MemFree"] ?: 0L
+        val buffers = bytes["Buffers"] ?: 0L
+        val cached = bytes["Cached"] ?: 0L
+
+        // MemAvailable exists on every kernel Android 11 ships with, but fall back
+        // to a conservative estimate if a device omits it.
+        val available = bytes["MemAvailable"] ?: (free + buffers + cached)
+
+        return RamSnapshot(
+            totalBytes = total,
+            availableBytes = available.coerceAtMost(total),
+            freeBytes = free,
+            buffersBytes = buffers,
+            cachedBytes = cached,
+            swapTotalBytes = bytes["SwapTotal"] ?: 0L,
+            swapFreeBytes = bytes["SwapFree"] ?: 0L,
+            timestamp = timestamp
+        )
+    }
+
+    val path: String get() = PROC_MEMINFO
+}
+----- file: ./app/src/main/java/com/cleanforge/core/memory/ClearMemoryResult.kt -----
+package com.cleanforge.core.memory
+
+/**
+ * Result of the honest clear action. freedBytes is a MEASURED delta in MemAvailable,
+ * never an estimate or a made-up number. It may legitimately be ~0.
+ */
+data class ClearMemoryResult(
+    val processesTouched: Int,
+    val freedBytes: Long,
+    val before: RamSnapshot?,
+    val after: RamSnapshot?,
+    /** Truthful copy shown to the user. Never claims a "boost". */
+    val note: String
+)
+----- file: ./app/src/main/java/com/cleanforge/core/memory/MemInfoProvider.kt -----
+package com.cleanforge.core.memory
+
+import java.io.File
+
+/** Abstraction so tests can inject fake content and the UI can fake pressure states. */
+interface MemoryInfoProvider {
+    /** Null if memory info could not be read. Callers must treat this as "unknown", never zero. */
+    fun snapshot(): RamSnapshot?
+}
+
+/**
+ * Reads /proc/meminfo directly. No permission required; the file is world-readable.
+ * Deliberately NOT routed through FsOps (that surface is scoped to shared storage).
+ */
+class ProcMemInfoProvider(
+    private val reader: () -> String? = DEFAULT_READER,
+    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+) : MemoryInfoProvider {
+
+    override fun snapshot(): RamSnapshot? {
+        val content = reader() ?: return null
+        return MemInfoParser.parse(content, timeProvider())
+    }
+
+    companion object {
+        private val DEFAULT_READER: () -> String? = {
+            try {
+                File(MemInfoParser.path).readText()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+}
+----- file: ./app/src/main/java/com/cleanforge/core/partB.patch -----
+diff -ruN origB/privileged/FileServiceCore.kt partB/privileged/FileServiceCore.kt
+--- origB/privileged/FileServiceCore.kt	2026-10-14 02:02:05.313764857 +0000
++++ partB/privileged/FileServiceCore.kt	2026-10-14 02:02:05.363052684 +0000
+@@ -74,7 +74,7 @@
+         // B) Implementation limitation: File.list() returned null despite being a dir.
+         // Treat as OS_DENIED or FAILED conservatively.
+         if (names == null) {
+-            return ListReply(ReplyStatus.OS_DENIED, detail = "Could not list contents of existing directory")
++            return ListReply(ReplyStatus.OS_DENIED)
+         }
+ 
+         val out = ArrayList<String>()
+diff -ruN origB/shizuku/ShizukuFileServiceConnector.kt partB/shizuku/ShizukuFileServiceConnector.kt
+--- origB/shizuku/ShizukuFileServiceConnector.kt	2026-10-14 02:02:05.313522266 +0000
++++ partB/shizuku/ShizukuFileServiceConnector.kt	2026-10-14 02:02:05.364176061 +0000
+@@ -14,8 +14,10 @@
+ import com.cleanforge.shizuku.IFileService
+ import dagger.hilt.android.qualifiers.ApplicationContext
+ import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
++import kotlinx.coroutines.withContext
+ import kotlinx.coroutines.withTimeoutOrNull
+ import rikka.shizuku.Shizuku
+ import java.util.concurrent.atomic.AtomicReference
+@@ -53,7 +55,10 @@
+             .version(BuildConfig.VERSION_CODE)
+     }
+ 
+-    override suspend fun acquire(): SessionResult = mutex.withLock {
++    // Shizuku status checks and bind/unbind are binder calls: always off the caller's (possibly main) thread.
++    override suspend fun acquire(): SessionResult = withContext(Dispatchers.IO) { acquireLocked() }
++
++    private suspend fun acquireLocked(): SessionResult = mutex.withLock {
+         manager.refresh()
+         val blocked = notReadyFor(manager.state.value)
+         if (blocked != null) {
+@@ -71,7 +76,7 @@
+     }
+ 
+     override suspend fun restart() {
+-        mutex.withLock { dropBinding(removeService = true) }
++        withContext(Dispatchers.IO) { mutex.withLock { dropBinding(removeService = true) } }
+     }
+ 
+     // ------------------------------------------------------------------ internals
+diff -ruN origB/shizuku/ShizukuManager.kt partB/shizuku/ShizukuManager.kt
+--- origB/shizuku/ShizukuManager.kt	2026-10-14 02:02:05.313444612 +0000
++++ partB/shizuku/ShizukuManager.kt	2026-10-14 02:02:05.365190981 +0000
+@@ -3,8 +3,12 @@
+ import android.content.Context
+ import android.content.pm.PackageManager
+ import dagger.hilt.android.qualifiers.ApplicationContext
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.SupervisorJob
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.launch
+ import rikka.shizuku.Shizuku
+ import javax.inject.Inject
+ import javax.inject.Singleton
+@@ -20,17 +24,20 @@
+     private val _state = MutableStateFlow<ShizukuState>(ShizukuState.NotRunning)
+     override val state: StateFlow<ShizukuState> = _state
+ 
+-    private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
++    // Shizuku calls its listeners on the main thread, and refresh() makes binder calls: hand them to a worker.
++    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++
++    private val binderReceived = Shizuku.OnBinderReceivedListener { io.launch { refresh() } }
+     private val binderDead = Shizuku.OnBinderDeadListener { _state.value = ShizukuState.Disconnected }
+     // The connector re-checks liveness on every acquire(), so a dead binder never leaves a stale service behind.
+-    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> refresh() }
++    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> io.launch { refresh() } }
+ 
+     /** Call once from Application.onCreate. Listeners live as long as the process. */
+     fun register() {
+         Shizuku.addBinderReceivedListenerSticky(binderReceived)
+         Shizuku.addBinderDeadListener(binderDead)
+         Shizuku.addRequestPermissionResultListener(permissionResult)
+-        refresh()
++        io.launch { refresh() }
+     }
+ 
+     fun unregister() {
+@@ -39,6 +46,8 @@
+         runCatching { Shizuku.removeRequestPermissionResultListener(permissionResult) }
+     }
+ 
++    /** Synchronized so two overlapping refreshes cannot publish an older reading after a newer one. */
++    @Synchronized
+     override fun refresh() {
+         _state.value = currentState()
+     }
+
+----- file: ./app/src/main/java/com/cleanforge/core/shizuku/ShizukuManager.kt -----
+package com.cleanforge.core.shizuku
+
+import android.content.Context
+import android.content.pm.PackageManager
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import rikka.shizuku.Shizuku
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Tracks the real Shizuku situation: installed? running? permission? Shizuku is NOT root (unless the user
+ * deliberately started it in root mode, which is surfaced via [ShizukuState.Authorized.isRoot]).
+ */
+@Singleton
+class ShizukuManager @Inject constructor(
+    @ApplicationContext private val context: Context
+) : ShizukuStateSource {
+    private val _state = MutableStateFlow<ShizukuState>(ShizukuState.NotRunning)
+    override val state: StateFlow<ShizukuState> = _state
+
+    // Shizuku calls its listeners on the main thread, and refresh() makes binder calls: hand them to a worker.
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val binderReceived = Shizuku.OnBinderReceivedListener { io.launch { refresh() } }
+    private val binderDead = Shizuku.OnBinderDeadListener { _state.value = ShizukuState.Disconnected }
+    // The connector re-checks liveness on every acquire(), so a dead binder never leaves a stale service behind.
+    private val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> io.launch { refresh() } }
+
+    /** Call once from Application.onCreate. Listeners live as long as the process. */
+    fun register() {
+        Shizuku.addBinderReceivedListenerSticky(binderReceived)
+        Shizuku.addBinderDeadListener(binderDead)
+        Shizuku.addRequestPermissionResultListener(permissionResult)
+        io.launch { refresh() }
+    }
+
+    fun unregister() {
+        runCatching { Shizuku.removeBinderReceivedListener(binderReceived) }
+        runCatching { Shizuku.removeBinderDeadListener(binderDead) }
+        runCatching { Shizuku.removeRequestPermissionResultListener(permissionResult) }
+    }
+
+    /** Synchronized so two overlapping refreshes cannot publish an older reading after a newer one. */
+    @Synchronized
+    override fun refresh() {
+        _state.value = currentState()
+    }
+
+    private fun currentState(): ShizukuState = try {
+        when {
+            !Shizuku.pingBinder() ->
+                if (isShizukuAppInstalled()) ShizukuState.NotRunning else ShizukuState.NotInstalled
+            Shizuku.isPreV11() -> ShizukuState.ServerTooOld
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED ->
+                ShizukuState.Authorized(Shizuku.getUid(), Shizuku.getVersion())
+            // Per the Shizuku API demo: true means the user chose "Deny and don't ask again".
+            Shizuku.shouldShowRequestPermissionRationale() -> ShizukuState.PermissionPermanentlyDenied
+            else -> ShizukuState.PermissionDenied
+        }
+    } catch (e: Exception) {
+        ShizukuState.Error(e.message ?: "Unknown Shizuku error")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun isShizukuAppInstalled(): Boolean = try {
+        context.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
+        true
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    fun requestPermission(requestCode: Int = REQUEST_CODE) {
+        try {
+            if (!Shizuku.pingBinder() || Shizuku.isPreV11()) {
+                refresh()
+                return
+            }
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                refresh()
+                return
+            }
+            if (Shizuku.shouldShowRequestPermissionRationale()) {
+                // "Don't ask again": requesting would show nothing. The UI tells the user to open Shizuku instead.
+                refresh()
+                return
+            }
+            Shizuku.requestPermission(requestCode)
+        } catch (e: Exception) {
+            _state.value = ShizukuState.Error(e.message ?: "Permission request failed")
+        }
+    }
+
+    companion object {
+        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        const val REQUEST_CODE = 4201
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/shizuku/AidlPrivilegedFileApi.kt -----
+package com.cleanforge.core.shizuku
+
+import android.os.DeadObjectException
+import android.os.RemoteException
+import android.os.TransactionTooLargeException
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.DeleteResult
+import com.cleanforge.core.fs.FsStat
+import com.cleanforge.core.privileged.ListReply
+import com.cleanforge.core.privileged.PrivilegedFileApi
+import com.cleanforge.core.privileged.SizeReply
+import com.cleanforge.core.privileged.StatReply
+import com.cleanforge.core.privileged.TransportException
+import com.cleanforge.core.privileged.WireCodec
+import com.cleanforge.shizuku.IFileService
+
+/**
+ * The thin, device-only layer between the AIDL stub and the pure-Kotlin [PrivilegedFileApi]. It does two things:
+ * decode replies with [WireCodec], and turn Android's remote-call exceptions into [TransportException] so nothing
+ * above it ever sees an Android class. It cannot be exercised on the JVM; see the device test checklist.
+ */
+class AidlPrivilegedFileApi(private val service: IFileService) : PrivilegedFileApi {
+
+    private inline fun <T> guarded(block: () -> T): T = try {
+        block()
+    } catch (e: DeadObjectException) {
+        throw TransportException(TransportException.Kind.SERVICE_DIED, "The Shizuku service stopped", e)
+    } catch (e: TransactionTooLargeException) {
+        throw TransportException(TransportException.Kind.CALL_FAILED, "The reply was too large", e)
+    } catch (e: RemoteException) {
+        throw TransportException(TransportException.Kind.SERVICE_DIED, "The Shizuku service could not be reached", e)
+    } catch (e: RuntimeException) {
+        throw TransportException(TransportException.Kind.CALL_FAILED, e.message ?: "The call failed", e)
+    }
+
+    override fun apiVersion(): Int = guarded { service.apiVersion() }
+
+    override fun uid(): Int = guarded { service.uid() }
+
+    override fun stat(path: String): StatReply = WireCodec.decodeStat(guarded { service.statEx(path) })
+
+    override fun list(path: String): ListReply = WireCodec.decodeList(guarded { service.listEx(path) })
+
+    override fun size(path: String): SizeReply = WireCodec.decodeSize(guarded { service.sizeEx(path) })
+
+    override fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult =
+        WireCodec.decodeDelete(
+            guarded { service.deleteEx(path, mode.code, expected?.dev ?: 0L, expected?.ino ?: 0L, expected != null) }
+        )
+
+    override fun cancelCurrent() = guarded { service.cancelCurrent() }
+
+    override fun setProtectedPackages(packages: Collection<String>): Int =
+        guarded { service.setProtectedPackages(packages.toTypedArray()) }
+
+    override fun processMemory(): com.cleanforge.core.privileged.ProcessListReply =
+        com.cleanforge.core.privileged.ProcessListReply(
+            com.cleanforge.core.privileged.ReplyStatus.OK,
+            com.cleanforge.core.privileged.ProcessMemoryReader.decode(guarded { service.processMemoryEx() })
+        )
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/shizuku/ShizukuStateSource.kt -----
+package com.cleanforge.core.shizuku
+
+import kotlinx.coroutines.flow.StateFlow
+
+/** What the capability code needs from Shizuku's status tracking. [ShizukuManager] is the real one; tests fake it. */
+interface ShizukuStateSource {
+    val state: StateFlow<ShizukuState>
+
+    /** Re-reads the live Shizuku status. Makes a binder call: never on the main thread. */
+    fun refresh()
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/shizuku/ShizukuState.kt -----
+package com.cleanforge.core.shizuku
+
+sealed interface ShizukuState {
+    data object NotInstalled : ShizukuState
+    data object NotRunning : ShizukuState
+
+    /** Running, but CleanForge has not been allowed yet. The permission dialog can still be shown. */
+    data object PermissionDenied : ShizukuState
+
+    /**
+     * The user chose "deny and don't ask again" (Shizuku API: shouldShowRequestPermissionRationale() is true).
+     * Asking again shows nothing; the user must allow CleanForge inside the Shizuku app.
+     */
+    data object PermissionPermanentlyDenied : ShizukuState
+
+    data object Disconnected : ShizukuState
+
+    /** The running Shizuku server predates version 11 and cannot host user services. */
+    data object ServerTooOld : ShizukuState
+
+    /**
+     * [uid] is 2000 for adb/shell mode, 0 if the user started Shizuku with root. This only says the binder is alive and
+     * CleanForge may use it; it does NOT prove any operation works (see CapabilityRegistry).
+     */
+    data class Authorized(val uid: Int, val serverVersion: Int = 0) : ShizukuState {
+        val isRoot: Boolean get() = uid == 0
+    }
+
+    data class Error(val message: String) : ShizukuState
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/shizuku/ShizukuFileService.kt -----
+package com.cleanforge.core.shizuku
+
+import android.os.Process
+import com.cleanforge.BuildConfig
+import com.cleanforge.core.fs.AndroidFsOps
+import com.cleanforge.core.privileged.FileServiceCore
+import com.cleanforge.core.privileged.PrivilegedProtocol
+import com.cleanforge.core.privileged.ReplyStatus
+import com.cleanforge.core.privileged.WireCodec
+import com.cleanforge.shizuku.IFileService
+import kotlin.system.exitProcess
+
+/**
+ * Runs in the Shizuku-started process (shell UID, or root if the user chose root mode).
+ * Public no-arg constructor is required by Shizuku. This class is only a Binder adapter: all logic, and all
+ * validation, is in [FileServiceCore], which trusts nothing from the caller (path rules, symlink-free ancestors,
+ * exactly two recursive delete shapes, installed-apps guard).
+ */
+class ShizukuFileService : IFileService.Stub() {
+
+    private val core = FileServiceCore(AndroidFsOps, BuildConfig.APPLICATION_ID)
+
+    override fun destroy() {
+        exitProcess(0)
+    }
+
+    override fun uid(): Int = Process.myUid()
+
+    override fun apiVersion(): Int = PrivilegedProtocol.API_VERSION
+
+    override fun statEx(path: String?): LongArray = WireCodec.encodeStat(core.stat(path))
+
+    override fun listEx(path: String?): Array<String> = WireCodec.encodeList(core.list(path))
+
+    override fun sizeEx(path: String?): LongArray = WireCodec.encodeSize(core.size(path))
+
+    override fun deleteEx(path: String?, mode: Int, dev: Long, ino: Long, hasIdentity: Boolean): Array<String> =
+        WireCodec.encodeDelete(core.delete(path, mode, dev, ino, hasIdentity))
+
+    override fun cancelCurrent() = core.cancelCurrent()
+
+    override fun setProtectedPackages(packages: Array<String>?): Int = core.setProtectedPackages(packages)
+
+    override fun processMemoryEx(): Array<String> = core.processMemory()
+
+    // ---- original methods, kept so an older app build still works; they cannot say WHY there is no value ----
+
+    override fun lstat(path: String?): LongArray? {
+        val r = core.stat(path)
+        val st = r.stat
+        if (r.status != ReplyStatus.OK || st == null) return null
+        return longArrayOf(st.type.code.toLong(), st.size, st.mtimeMs, st.dev, st.ino)
+    }
+
+    override fun list(path: String?): Array<String>? {
+        val r = core.list(path)
+        return if (r.status == ReplyStatus.OK) r.names.toTypedArray() else null
+    }
+
+    override fun directorySize(path: String?): LongArray? {
+        val r = core.size(path)
+        val size = r.size
+        if (r.status != ReplyStatus.OK || size == null) return null
+        return longArrayOf(size.bytes, if (size.complete) 1L else 0L)
+    }
+
+    override fun delete(path: String?, mode: Int, dev: Long, ino: Long, hasIdentity: Boolean): LongArray {
+        val r = core.delete(path, mode, dev, ino, hasIdentity)
+        return longArrayOf(r.status.code.toLong(), r.entriesRemoved.toLong(), r.bytesFreed)
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/shizuku/ShizukuFileServiceConnector.kt -----
+package com.cleanforge.core.shizuku
+
+import android.content.ComponentName
+import android.content.Context
+import android.content.ServiceConnection
+import android.os.IBinder
+import com.cleanforge.BuildConfig
+import com.cleanforge.core.privileged.PrivilegedFileApi
+import com.cleanforge.core.privileged.PrivilegedProtocol
+import com.cleanforge.core.privileged.PrivilegedSessionProvider
+import com.cleanforge.core.privileged.SessionResult
+import com.cleanforge.core.privileged.TransportException
+import com.cleanforge.core.privileged.UnavailableReason
+import com.cleanforge.shizuku.IFileService
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import rikka.shizuku.Shizuku
+import java.util.concurrent.atomic.AtomicReference
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Owns the lifecycle of the Shizuku user-service binding: bind on demand with a deadline, version-check the service,
+ * detect process death, rebind after Shizuku restarts, and say precisely why there is no service when there is none.
+ *
+ * Every bind attempt uses its OWN [ServiceConnection] and its own result holder, so a late callback from an
+ * abandoned attempt can never be mistaken for the current one. After a bind timeout the half-started service is
+ * removed instead of being left behind.
+ *
+ * NOT unit-testable (it talks to Shizuku's static API). See the device test checklist in
+ * docs/SHIZUKU_CAPABILITY_MATRIX.md; whether bindUserService re-delivers onServiceConnected for a reused connection
+ * is unknown, which is why a fresh connection object is used each time.
+ */
+@Singleton
+class ShizukuFileServiceConnector @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val manager: ShizukuManager
+) : PrivilegedSessionProvider {
+    private val mutex = Mutex()
+
+    private class Binding(val connection: ServiceConnection, val binder: IBinder, val api: PrivilegedFileApi)
+
+    private val current = AtomicReference<Binding?>(null)
+
+    private val args: Shizuku.UserServiceArgs by lazy {
+        Shizuku.UserServiceArgs(ComponentName(context.packageName, ShizukuFileService::class.java.name))
+            .daemon(false)
+            .processNameSuffix("fs")
+            .debuggable(BuildConfig.DEBUG)
+            .version(BuildConfig.VERSION_CODE)
+    }
+
+    // Shizuku status checks and bind/unbind are binder calls: always off the caller's (possibly main) thread.
+    override suspend fun acquire(): SessionResult = withContext(Dispatchers.IO) { acquireLocked() }
+
+    private suspend fun acquireLocked(): SessionResult = mutex.withLock {
+        manager.refresh()
+        val blocked = notReadyFor(manager.state.value)
+        if (blocked != null) {
+            dropBinding(removeService = false) // never keep a service reference across a dead or revoked Shizuku
+            return@withLock blocked
+        }
+        val existing = current.get()
+        if (existing != null && existing.binder.pingBinder()) return@withLock SessionResult.Ready(existing.api)
+        dropBinding(removeService = false)
+        bind()
+    }
+
+    override fun invalidate() {
+        dropBinding(removeService = false)
+    }
+
+    override suspend fun restart() {
+        withContext(Dispatchers.IO) { mutex.withLock { dropBinding(removeService = true) } }
+    }
+
+    // ------------------------------------------------------------------ internals
+
+    private fun notReadyFor(state: ShizukuState): SessionResult.NotReady? = when (state) {
+        is ShizukuState.Authorized -> null
+        ShizukuState.NotInstalled -> SessionResult.NotReady(UnavailableReason.NOT_INSTALLED, "Shizuku is not installed")
+        ShizukuState.NotRunning -> SessionResult.NotReady(UnavailableReason.NOT_RUNNING, "Shizuku is not running")
+        ShizukuState.Disconnected -> SessionResult.NotReady(UnavailableReason.NOT_RUNNING, "The Shizuku service stopped")
+        ShizukuState.PermissionDenied ->
+            SessionResult.NotReady(UnavailableReason.NEEDS_PERMISSION, "CleanForge has not been allowed in Shizuku")
+        ShizukuState.PermissionPermanentlyDenied ->
+            SessionResult.NotReady(
+                UnavailableReason.PERMISSION_PERMANENTLY_DENIED,
+                "Permission was denied with \"don't ask again\"; allow CleanForge inside the Shizuku app"
+            )
+        ShizukuState.ServerTooOld ->
+            SessionResult.NotReady(UnavailableReason.SERVER_TOO_OLD, "The running Shizuku is too old (version 11 or newer is required)")
+        is ShizukuState.Error -> SessionResult.NotReady(UnavailableReason.SHIZUKU_ERROR, state.message)
+    }
+
+    private suspend fun bind(): SessionResult {
+        val result = CompletableDeferred<IBinder?>() // null = the service went away before it connected
+        val connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+                result.complete(binder)
+            }
+
+            override fun onServiceDisconnected(name: ComponentName) {
+                // Process death, or unbind. Forget this binding if it is the live one; release a pending bind.
+                val live = current.get()
+                if (live != null && live.connection === this) current.compareAndSet(live, null)
+                result.complete(null)
+            }
+        }
+
+        try {
+            Shizuku.bindUserService(args, connection)
+        } catch (e: Exception) {
+            return SessionResult.NotReady(
+                UnavailableReason.BIND_FAILED,
+                "Shizuku refused to start the service: ${e.message ?: e.javaClass.simpleName}"
+            )
+        }
+
+        val binder = withTimeoutOrNull(BIND_TIMEOUT_MS) { result.await() }
+        if (binder == null) {
+            val died = result.isCompleted // completed with null: the service went away; otherwise: no answer in time
+            unbindQuietly(connection, removeService = true)
+            return if (died) {
+                SessionResult.NotReady(UnavailableReason.SERVICE_DIED, "The Shizuku service stopped while starting")
+            } else {
+                SessionResult.NotReady(UnavailableReason.BIND_TIMEOUT, "The Shizuku service did not start within ${BIND_TIMEOUT_MS / 1000} s")
+            }
+        }
+        if (!binder.pingBinder()) {
+            unbindQuietly(connection, removeService = true)
+            return SessionResult.NotReady(UnavailableReason.SERVICE_DIED, "The Shizuku service stopped while starting")
+        }
+
+        val api = AidlPrivilegedFileApi(IFileService.Stub.asInterface(binder))
+        val version = try {
+            api.apiVersion()
+        } catch (e: TransportException) {
+            unbindQuietly(connection, removeService = true)
+            return SessionResult.NotReady(
+                UnavailableReason.SERVICE_VERSION_MISMATCH,
+                "The running Shizuku service does not speak this version of CleanForge's protocol; restart Shizuku and the app"
+            )
+        }
+        if (version < PrivilegedProtocol.MIN_API_VERSION) {
+            unbindQuietly(connection, removeService = true)
+            return SessionResult.NotReady(
+                UnavailableReason.SERVICE_VERSION_MISMATCH,
+                "The running service is outdated (protocol $version); restart Shizuku and the app"
+            )
+        }
+
+        current.set(Binding(connection, binder, api))
+        return SessionResult.Ready(api)
+    }
+
+    private fun dropBinding(removeService: Boolean) {
+        val old = current.getAndSet(null) ?: return
+        unbindQuietly(old.connection, removeService)
+    }
+
+    private fun unbindQuietly(connection: ServiceConnection, removeService: Boolean) {
+        try {
+            Shizuku.unbindUserService(args, connection, removeService)
+        } catch (e: Exception) {
+            // Shizuku may already be gone; nothing left to release.
+        }
+    }
+
+    private companion object {
+        const val BIND_TIMEOUT_MS = 6_000L
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/cleaning/CleaningEngine.kt -----
+package com.cleanforge.core.cleaning
+
+import com.cleanforge.core.backend.Capabilities
+import com.cleanforge.core.backend.FileOperationBackend
+import com.cleanforge.core.backend.FsResult
+import com.cleanforge.core.backend.InstallState
+import com.cleanforge.core.backend.MIN_PLAUSIBLE_PACKAGES
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.CleaningReport
+import com.cleanforge.core.model.ConfirmedPlan
+import com.cleanforge.core.model.ItemOutcome
+import com.cleanforge.core.model.ItemStatus
+import com.cleanforge.core.model.ScanItem
+import com.cleanforge.core.privileged.FailureKind
+import com.cleanforge.core.privileged.MaintenanceResult
+import com.cleanforge.core.privileged.OperationCapability
+import com.cleanforge.core.privileged.PrivilegedExecutor
+import com.cleanforge.core.privileged.PrivilegedOperation
+import com.cleanforge.core.privileged.classifyDeletion
+import com.cleanforge.core.privileged.observePostState
+import com.cleanforge.core.privileged.toMaintenanceRequest
+import com.cleanforge.core.safety.SafetyValidator
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+sealed interface CleaningProgress {
+    data class Started(val total: Int) : CleaningProgress
+
+    /** Emitted BEFORE an item is touched, so a stop request can say which item was in flight. */
+    data class ItemStarted(val index: Int, val total: Int, val item: ScanItem) : CleaningProgress
+
+    /** [outcome] is the finished item's result; the UI keeps them so a stopped run still has an accurate report. */
+    data class Progress(
+        val done: Int,
+        val total: Int,
+        val freedBytes: Long,
+        val currentName: String,
+        val outcome: ItemOutcome? = null
+    ) : CleaningProgress
+
+    data class Completed(val report: CleaningReport) : CleaningProgress
+}
+
+/**
+ * Executes a [ConfirmedPlan]. Pipeline per item:
+ *   REVALIDATE (policy + live capabilities + fresh evidence + fingerprint) -> DELETE -> VERIFY -> REPORT.
+ * Sequential on purpose: gentle on a low-end eMMC and trivially cancellable between items.
+ * Nothing in here accepts a ScanItem list directly; a human-confirmed plan is the only entry point.
+ *
+ * Privileged items (Android/data caches, uninstalled-app leftovers) go through [PrivilegedExecutor] as typed
+ * maintenance requests; everything else runs in this process through [standardBackend]. An item that cannot be mapped
+ * to a supported privileged operation is skipped with a reason, never run as some weaker operation.
+ */
+class CleaningEngine(
+    private val safety: SafetyValidator,
+    private val standardBackend: FileOperationBackend,
+    private val privileged: PrivilegedExecutor,
+    private val inventory: PackageInventory,
+    private val capabilities: Capabilities
+) {
+
+    /**
+     * What ONE run has already established, so a plan of hundreds of items does not repeat the two expensive questions
+     * (the full package list, the Shizuku capability probe) for every item. A new run starts empty: nothing is reused
+     * across runs. The cheap, per-package install state and the Shizuku authorization are still asked for every item.
+     */
+    private class RunCache {
+        var knownPackages: Set<String>? = null
+        val ready = HashMap<PrivilegedOperation, OperationCapability>()
+    }
+
+    fun execute(confirmed: ConfirmedPlan): Flow<CleaningProgress> = flow {
+        val cache = RunCache()
+        val items = confirmed.plan.items
+        val outcomes = ArrayList<ItemOutcome>(items.size)
+        var freed = 0L
+        emit(CleaningProgress.Started(items.size))
+        for ((index, item) in items.withIndex()) {
+            currentCoroutineContext().ensureActive()
+            emit(CleaningProgress.ItemStarted(index + 1, items.size, item))
+            val outcome = try {
+                processItem(item, cache)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                // A failing capability/inventory call must cost ONE item, not the whole run and its report.
+                failed(item, t.message ?: "Cleanup failed unexpectedly")
+            }
+            outcomes += outcome
+            freed += outcome.bytesFreed
+            emit(CleaningProgress.Progress(index + 1, items.size, freed, item.displayName, outcome))
+        }
+        emit(CleaningProgress.Completed(CleaningReport(outcomes)))
+    }.flowOn(Dispatchers.IO)
+
+    private suspend fun processItem(item: ScanItem, cache: RunCache): ItemOutcome {
+        // ---- REVALIDATE ----
+        val refusal = safety.rejectionReason(item)
+        if (refusal != null) return skipped(item, "Safety check failed: $refusal")
+
+        if (!item.requiresShizuku && !capabilities.hasAllFilesAccess()) {
+            return skipped(item, "All-files access is no longer granted")
+        }
+        if (item.requiresShizuku && !capabilities.shizukuAuthorized()) {
+            return skipped(item, "Shizuku is not available right now")
+        }
+
+        var known: Set<String> = emptySet()
+        if (item.category == CleaningCategory.CORPSE_LEFTOVER || item.category == CleaningCategory.APP_CACHE) {
+            val pkg = item.owningPackage ?: return skipped(item, "No package recorded for this folder")
+            val snapshot = cache.knownPackages ?: inventory.knownPackageNames()
+            if (snapshot == null || snapshot.size < MIN_PLAUSIBLE_PACKAGES) {
+                return skipped(item, "Could not verify which apps are installed")
+            }
+            cache.knownPackages = snapshot
+            known = snapshot
+            // Two different questions: "known" includes data-kept uninstalls, "installed" does not. A failed query is
+            // UNKNOWN and is never read as "not installed" (that would be the unsafe answer for a leftover).
+            val state = inventory.installState(pkg)
+            if (state == InstallState.UNKNOWN) return skipped(item, "Could not verify whether $pkg is installed")
+            if (item.category == CleaningCategory.CORPSE_LEFTOVER) {
+                val knownLower = known.any { it.equals(pkg, ignoreCase = true) }
+                if (state != InstallState.NOT_KNOWN || pkg in known || knownLower) {
+                    return skipped(item, "$pkg is known to Android again; its folder is no longer a leftover")
+                }
+            } else if (state != InstallState.INSTALLED || pkg !in known) {
+                return skipped(item, "$pkg is not currently installed")
+            }
+        }
+
+        return if (item.requiresShizuku) processPrivileged(item, known, cache) else processStandard(item)
+    }
+
+    // ---------------------------------------------------------------- privileged path
+
+    private suspend fun processPrivileged(item: ScanItem, known: Set<String>, cache: RunCache): ItemOutcome {
+        val expected = item.fingerprint ?: return skipped(item, "No scan snapshot for this item; scan again")
+        val request = item.toMaintenanceRequest(known)
+            ?: return skipped(item, "This item is not a kind of cleanup the Shizuku service supports, so it was left alone")
+
+        val readiness = cache.ready[request.operation]
+            ?: capabilities.readiness(request.operation).also { if (it.canAttempt) cache.ready[request.operation] = it }
+        if (!readiness.canAttempt) return skipped(item, "Not available right now: ${readiness.reason}")
+
+        when (val now = privileged.stat(item.path)) {
+            is FsResult.Ok -> if (!now.value.sameObjectAs(expected)) {
+                return skipped(item, "Changed since the scan; scan again to include it")
+            }
+            FsResult.NotFound -> return skipped(item, "Already gone")
+            is FsResult.Unavailable -> return failed(item, "The Shizuku service could not be reached: ${now.why}")
+            is FsResult.Denied -> return failed(item, "Could not examine this item: ${now.why}")
+            is FsResult.Failed -> return failed(item, "Could not examine this item: ${now.why}")
+        }
+
+        val result = try {
+            privileged.execute(request)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            return failed(item, t.message ?: "Cleanup failed unexpectedly")
+        }
+        return outcomeFrom(item, result)
+    }
+
+    // ---------------------------------------------------------------- standard (app process) path
+
+    private suspend fun processStandard(item: ScanItem): ItemOutcome {
+        if (item.category == CleaningCategory.DUPLICATE) {
+            if (item.keepPath == item.path) return skipped(item, "The copy that should stay is this very file")
+            val keepThen = item.keepFingerprint
+            val keepNow = item.keepPath?.let { (standardBackend.lstat(it) as? FsResult.Ok)?.value }
+            if (keepNow == null || keepThen == null || !keepNow.sameObjectAs(keepThen)) {
+                return skipped(item, "The copy that should stay changed or disappeared")
+            }
+        }
+
+        val expected = item.fingerprint ?: return skipped(item, "No scan snapshot for this item; scan again")
+        when (val now = standardBackend.lstat(item.path)) {
+            is FsResult.Ok -> if (!now.value.sameObjectAs(expected)) {
+                return skipped(item, "Changed since the scan; scan again to include it")
+            }
+            FsResult.NotFound -> return skipped(item, "Already gone")
+            is FsResult.Unavailable -> return failed(item, "Could not examine this item: ${now.why}")
+            is FsResult.Denied -> return failed(item, "Could not examine this item: ${now.why}")
+            is FsResult.Failed -> return failed(item, "Could not examine this item: ${now.why}")
+        }
+
+        // ---- DELETE ----
+        val result = try {
+            standardBackend.delete(item.path, item.deleteMode, expected)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            return failed(item, t.message ?: "Delete failed unexpectedly")
+        }
+
+        // ---- VERIFY ----
+        val post = observePostState(item.path, item.deleteMode, { standardBackend.lstat(it) }, { standardBackend.list(it) })
+        return outcomeFrom(item, classifyDeletion(item.deleteMode, result, post))
+    }
+
+    // ---------------------------------------------------------------- reporting
+
+    /** The only place a [MaintenanceResult] becomes a user-visible status. */
+    private fun outcomeFrom(item: ScanItem, r: MaintenanceResult): ItemOutcome = when (r) {
+        is MaintenanceResult.Success -> ItemOutcome(item, ItemStatus.DELETED, r.message, r.bytesFreed)
+        is MaintenanceResult.Partial -> ItemOutcome(item, ItemStatus.PARTIAL, r.message, r.bytesFreed)
+        is MaintenanceResult.Unverified -> ItemOutcome(item, ItemStatus.UNVERIFIED, r.message, r.bytesFreed)
+        is MaintenanceResult.Unsupported -> skipped(item, "Not available right now: ${r.message}")
+        is MaintenanceResult.Failure -> when (r.kind) {
+            FailureKind.PRECONDITION_CHANGED, FailureKind.REFUSED -> skipped(item, r.message)
+            FailureKind.UNAVAILABLE, FailureKind.LIMIT, FailureKind.CANCELLED, FailureKind.IO_ERROR ->
+                ItemOutcome(item, ItemStatus.FAILED, r.message, r.bytesFreed)
+        }
+    }
+
+    private fun skipped(item: ScanItem, why: String) = ItemOutcome(item, ItemStatus.SKIPPED, why)
+    private fun failed(item: ScanItem, why: String) = ItemOutcome(item, ItemStatus.FAILED, why)
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/cleaning/PlanBuilder.kt -----
+package com.cleanforge.core.cleaning
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.CleaningPlan
+import com.cleanforge.core.model.RejectedItem
+import com.cleanforge.core.model.ScanItem
+import com.cleanforge.core.safety.SafetyValidator
+import javax.inject.Inject
+
+/** VALIDATE + PLAN. Turns the user's selection into a plan; refused items are kept WITH their reason. */
+class PlanBuilder @Inject constructor(private val validator: SafetyValidator) {
+
+    /**
+     * @param selected the items the user ticked.
+     * @param scanned every item of the current scan. Needed to know the OTHER copies of a duplicate group,
+     *   because the copy that stays is whichever one the user did not tick, never one CleanForge guessed.
+     */
+    fun build(selected: List<ScanItem>, scanned: List<ScanItem>): CleaningPlan {
+        val rejected = ArrayList<RejectedItem>()
+        val valid = ArrayList<ScanItem>()
+        val seen = HashSet<String>()
+
+        // If one path was flagged twice (say as a large file AND as a duplicate), plan the duplicate form:
+        // it is the one that carries the "a copy must stay" protection. (sortedBy is stable.)
+        val ordered = selected.sortedBy { if (it.category == CleaningCategory.DUPLICATE) 0 else 1 }
+        for (item in ordered) {
+            val reason = validator.rejectionReason(item)
+            when {
+                reason != null -> rejected += RejectedItem(item, reason)
+                !seen.add(item.path) -> rejected += RejectedItem(item, "Selected twice")
+                else -> valid += item
+            }
+        }
+
+        // Nothing may be deleted both as part of a folder and on its own.
+        val folderRoots = valid
+            .filter { it.deleteMode == DeleteMode.TREE || it.deleteMode == DeleteMode.CONTENTS_ONLY }
+            .map { it.path }
+        val afterOverlap = ArrayList<ScanItem>()
+        for (item in valid) {
+            val parent = folderRoots.firstOrNull { it != item.path && item.path.startsWith("$it/") }
+            if (parent != null) rejected += RejectedItem(item, "Already covered by $parent") else afterOverlap += item
+        }
+
+        // A duplicate may only be removed while a copy the user did NOT tick is guaranteed to survive.
+        // Everything that is a candidate counts as "going away", even if it is refused further down: that can
+        // only make the rule stricter, never looser.
+        val deleting = afterOverlap.mapTo(HashSet<String>()) { it.path }
+        fun insideCleanedFolder(path: String) = folderRoots.any { path.startsWith("$it/") }
+        val copiesByGroup: Map<String, List<ScanItem>> = scanned
+            .filter { it.category == CleaningCategory.DUPLICATE && it.groupId != null }
+            .groupBy { it.groupId ?: "" }
+
+        val planned = ArrayList<ScanItem>()
+        for (item in afterOverlap) {
+            if (item.category != CleaningCategory.DUPLICATE) {
+                planned += item
+                continue
+            }
+            val copies = item.groupId?.let { copiesByGroup[it] }.orEmpty()
+            val others = copies.filter { it.path != item.path && it.path !in deleting && it.fingerprint != null }
+            // A copy inside a folder that is being emptied in the same run is not a keeper: it goes away too.
+            val survivor = others.firstOrNull { !insideCleanedFolder(it.path) }
+            if (survivor == null) {
+                val why = when {
+                    copies.size < 2 -> "The other copies of this file are unknown; scan again"
+                    others.isNotEmpty() -> "The only other copy lies in a folder that is also being cleaned; at least one must stay"
+                    else -> "Every copy of this file is selected; at least one must stay"
+                }
+                rejected += RejectedItem(item, why)
+                continue
+            }
+            planned += item.copy(keepPath = survivor.path, keepFingerprint = survivor.fingerprint)
+        }
+
+        // The same rule must hold when the copies were ticked through some OTHER category (e.g. large files):
+        // never plan the deletion of every copy of the same content.
+        val plannedPaths = planned.mapTo(HashSet<String>()) { it.path }
+        val wholeGroupPaths = HashSet<String>()
+        for (copies in copiesByGroup.values) {
+            // "Going away" also covers a copy that lies inside a folder emptied in the same run.
+            if (copies.all { it.path in plannedPaths || insideCleanedFolder(it.path) }) {
+                copies.mapTo(wholeGroupPaths) { it.path }
+            }
+        }
+        val finalItems = ArrayList<ScanItem>()
+        for (item in planned) {
+            if (item.path in wholeGroupPaths) {
+                rejected += RejectedItem(item, "Every copy of this file is selected; at least one must stay")
+            } else {
+                finalItems += item
+            }
+        }
+        return CleaningPlan(finalItems, rejected)
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/CorpseScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.FsResult
+import com.cleanforge.core.backend.InstallState
+import com.cleanforge.core.backend.MIN_PLAUSIBLE_PACKAGES
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.backend.reasonOrNull
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import com.cleanforge.core.model.SizeQuality
+import com.cleanforge.core.privileged.PrivilegedOperation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * Leftover folders of uninstalled apps. This can destroy game saves, so it is NEVER pre-selected and is
+ * ELEVATED risk. Evidence required (all of): valid package-name folder, package unknown to the OS for the current
+ * user/profile (a package uninstalled with its data kept is still "known", so it is NOT flagged) and not installed,
+ * real directory (not a link), untouched for at least [minAgeDays].
+ * The folder's existence is never evidence that the app is or is not installed; only the package manager decides,
+ * and a failed package-manager query ([InstallState.UNKNOWN]) skips the folder instead of calling it a leftover.
+ * If the package list cannot be read or looks implausibly small, NOTHING is flagged and the reason is reported.
+ */
+class CorpseScanner(
+    private val backend: FileReadBackend,
+    private val inventory: PackageInventory,
+    private val root: String = PathRules.ROOT,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val minAgeDays: Int = 14
+) : Scanner {
+    override val id = "corpse"
+    override val displayName = "Uninstalled-app leftovers"
+    override val requirement = Requirement.SHIZUKU
+    override val mode = ScanMode.QUICK
+    override val privilegedOperations = setOf(
+        PrivilegedOperation.LIST_EXTERNAL_APP_DATA,
+        PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR
+    )
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val known = inventory.knownPackageNames()
+        if (known == null || known.size < MIN_PLAUSIBLE_PACKAGES) {
+            incomplete = listOf("Android's list of installed apps could not be read or looks incomplete, so no leftover could be verified")
+            return@flow
+        }
+        // Shared storage is case-insensitive: a folder spelled differently from a known package is still that package.
+        val knownLower = known.mapTo(HashSet<String>()) { it.lowercase() }
+
+        val notes = ArrayList<String>()
+        var unclassified = 0
+        var unmeasured = 0
+        var stoppedBecause: String? = null
+        val batch = ArrayList<ScanItem>()
+        areas@ for (area in listOf("data", "obb")) {
+            val areaRoot = "$root/Android/$area"
+            val listing = when (val r = backend.list(areaRoot)) {
+                is FsResult.Ok -> r.value
+                else -> {
+                    notes += "Android/$area could not be listed (${r.reasonOrNull() ?: "folder not found"})"
+                    continue@areas
+                }
+            }
+            if (listing.truncated) notes += "Android/$area has more folders than could be listed; some were not checked"
+            for (pkg in listing.names) {
+                currentCoroutineContext().ensureActive()
+                if (!PathRules.isValidPackageName(pkg) || pkg in known || pkg.lowercase() in knownLower) continue
+                // Only an authoritative NOT_KNOWN may become a leftover. INSTALLED / data-kept are never leftovers and
+                // UNKNOWN (query failed) must not be read as "not installed".
+                val state = inventory.installState(pkg)
+                if (state == InstallState.UNKNOWN) {
+                    unclassified++
+                    continue
+                }
+                if (state != InstallState.NOT_KNOWN) continue
+
+                val dir = "$areaRoot/$pkg"
+                val stat = backend.lstat(dir)
+                if (stat is FsResult.Unavailable) {
+                    stoppedBecause = stat.why
+                    break@areas
+                }
+                if (stat !is FsResult.Ok) {
+                    if (stat !is FsResult.NotFound) unmeasured++
+                    continue
+                }
+                val st = stat.value
+                if (st.type != FsType.DIRECTORY) continue
+                val ageDays = (nowMs() - st.mtimeMs) / DAY_MS
+                if (ageDays < minAgeDays) continue
+
+                val sizeRes = backend.directorySize(dir)
+                if (sizeRes is FsResult.Unavailable) {
+                    stoppedBecause = sizeRes.why
+                    break@areas
+                }
+                if (sizeRes !is FsResult.Ok) {
+                    unmeasured++
+                    continue
+                }
+                val size = sizeRes.value
+                if (size.bytes <= 0L) {
+                    if (!size.isExact) unmeasured++
+                    continue
+                }
+                batch += ScanItem(
+                    path = dir,
+                    sizeBytes = size.bytes,
+                    category = CleaningCategory.CORPSE_LEFTOVER,
+                    reasonForFlagging = "Android lists no app named $pkg for this user profile, neither installed nor uninstalled with data kept; " +
+                        "this Android/$area folder was last changed $ageDays days ago. " +
+                        "It may still hold game saves or downloads you could want if you reinstall." +
+                        (if (size.isExact) "" else " The size is a lower bound: part of the folder could not be read or is very large."),
+                    confidence = ConfidenceLevel.MEDIUM,
+                    risk = RiskLevel.ELEVATED,
+                    owningPackage = pkg,
+                    requiresShizuku = true,
+                    deleteMode = DeleteMode.TREE,
+                    reversibility = Reversibility.NOT_REVERSIBLE,
+                    lastModified = st.mtimeMs,
+                    fingerprint = st,
+                    sizeQuality = if (size.isExact) SizeQuality.MEASURED else SizeQuality.LOWER_BOUND,
+                    unreadableCount = size.unreadable
+                )
+                if (batch.size >= BATCH_SIZE) {
+                    emit(batch.toList())
+                    batch.clear()
+                }
+            }
+        }
+
+        if (unclassified > 0) notes += "$unclassified folder(s) could not be matched against installed apps and were skipped"
+        if (unmeasured > 0) notes += "$unmeasured folder(s) could not be examined or measured and were skipped"
+        stoppedBecause?.let { notes += "The scan stopped early: $it" }
+        incomplete = notes
+
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/DuplicateScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.fs.WalkLimits
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import java.io.FileInputStream
+import java.io.IOException
+import java.security.MessageDigest
+
+/**
+ * Staged and bounded: (1) group by exact size, files >= [minBytes] only; (2) SHA-256 of the first 64 KB;
+ * (3) full SHA-256 only for the survivors. Hard links to the same inode are not "duplicates" (deleting one
+ * frees nothing).
+ *
+ * EVERY copy of a group is listed (oldest first, purely so the list reads the same on each scan; age says
+ * nothing about which copy the user values). The scanner never decides which copy stays. The user ticks the copies
+ * to delete; PlanBuilder then pins one copy the user left UNTICKED as the keeper (with its scan-time fingerprint),
+ * refuses to plan a group whose every copy is ticked, and CleaningEngine refuses to delete a duplicate unless that
+ * kept copy is still intact.
+ * On demand only (hashing is the heaviest work in the app). Never pre-selected.
+ */
+class DuplicateScanner(
+    private val fs: FsOps,
+    private val root: String = PathRules.ROOT,
+    private val minBytes: Long = 1024L * 1024L
+) : Scanner {
+    override val id = "duplicates"
+    override val displayName = "Duplicate files"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.ON_DEMAND
+
+    private val limits = WalkLimits(maxDepth = 32, maxEntries = 100_000)
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
+        // Pass 1: size groups.
+        val bySize = HashMap<Long, MutableList<StorageWalker.Entry>>()
+        var n = 0
+        for (dir in LargeFileScanner.ROOTS) {
+            for (e in StorageWalker(fs).walkNoting("$root/$dir", notes, limits = limits)) {
+                if (++n % 256 == 0) currentCoroutineContext().ensureActive()
+                if (e.stat.type != FsType.FILE || e.stat.size < minBytes) continue
+                bySize.getOrPut(e.stat.size) { ArrayList() } += e
+            }
+        }
+
+        incomplete = notes.reasons() // the walking is done; hashing below cannot add to it
+
+        // Pass 2: partial hash among same-size files that are not the same inode.
+        val byPartial = HashMap<String, MutableList<StorageWalker.Entry>>()
+        for ((size, group) in bySize) {
+            if (group.size < 2) continue
+            if (group.map { it.stat.dev to it.stat.ino }.toSet().size < 2) continue
+            for (e in group) {
+                val h = sha256(e.path, PARTIAL_BYTES) ?: continue
+                byPartial.getOrPut("$size:$h") { ArrayList() } += e
+            }
+        }
+
+        // Pass 3: full hash.
+        val byFull = HashMap<String, MutableList<StorageWalker.Entry>>()
+        for ((key, group) in byPartial) {
+            if (group.size < 2) continue
+            for (e in group) {
+                val h = sha256(e.path, Long.MAX_VALUE) ?: continue
+                byFull.getOrPut("${key.substringBefore(':')}:$h") { ArrayList() } += e
+            }
+        }
+
+        val batch = ArrayList<ScanItem>()
+        var groupIdx = 0
+        for (group in byFull.values) {
+            if (group.size < 2) continue
+            // Distinct inodes only. Oldest first only for a stable display order, NOT a preference.
+            val distinct = group.distinctBy { it.stat.dev to it.stat.ino }
+            if (distinct.size < 2) continue
+            val ordered = distinct.sortedWith(
+                compareBy<StorageWalker.Entry> { it.stat.mtimeMs }.thenBy { it.path.length }.thenBy { it.path }
+            )
+            val groupId = "dup_${groupIdx++}"
+            for (copy in ordered) {
+                val others = ordered.filter { it.path != copy.path }
+                val shown = others.take(MAX_SHOWN_OTHERS).joinToString("; ") { it.path.removePrefix(root) }
+                val more = if (others.size > MAX_SHOWN_OTHERS) " (+${others.size - MAX_SHOWN_OTHERS} more)" else ""
+                batch += ScanItem(
+                    path = copy.path,
+                    sizeBytes = copy.stat.size,
+                    category = CleaningCategory.DUPLICATE,
+                    reasonForFlagging = "Byte-identical (SHA-256) to ${others.size} other " +
+                        (if (others.size == 1) "copy" else "copies") + ": $shown$more. " +
+                        "CleanForge does not guess which copy you want: tick the one(s) to delete. " +
+                        "At least one copy always stays.",
+                    confidence = ConfidenceLevel.MEDIUM,
+                    risk = RiskLevel.ELEVATED,
+                    deleteMode = DeleteMode.FILE,
+                    reversibility = Reversibility.NOT_REVERSIBLE,
+                    lastModified = copy.stat.mtimeMs,
+                    groupId = groupId,
+                    fingerprint = copy.stat
+                    // keepPath / keepFingerprint stay null on purpose: the survivor is chosen at PLAN time
+                    // from the copies the user did not tick.
+                )
+                if (batch.size >= BATCH_SIZE) {
+                    emit(batch.toList())
+                    batch.clear()
+                }
+            }
+        }
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+
+    private suspend fun sha256(path: String, limitBytes: Long): String? {
+        return try {
+            val md = MessageDigest.getInstance("SHA-256")
+            FileInputStream(path).use { ins ->
+                val buf = ByteArray(64 * 1024)
+                var remaining = limitBytes
+                while (remaining > 0) {
+                    val want = if (remaining < buf.size) remaining.toInt() else buf.size
+                    val r = ins.read(buf, 0, want)
+                    if (r < 0) break
+                    md.update(buf, 0, r)
+                    remaining -= r
+                    currentCoroutineContext().ensureActive()
+                }
+            }
+            md.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: IOException) {
+            null
+        } catch (e: SecurityException) {
+            null
+        }
+    }
+
+    private companion object {
+        const val PARTIAL_BYTES = 64L * 1024L
+        const val MAX_SHOWN_OTHERS = 3
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/TempScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * Abandoned partial downloads in Download/. Evidence = a browser/downloader partial-file extension
+ * AND not modified for [minAgeDays] days. A bare ".tmp"/".bak" is NOT enough and ".bak" is never flagged
+ * (backups are user data). DCIM/Pictures are never scanned. Never pre-selected.
+ */
+class TempScanner(
+    private val fs: FsOps,
+    private val root: String = PathRules.ROOT,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val minAgeDays: Int = 7
+) : Scanner {
+    override val id = "partial_downloads"
+    override val displayName = "Incomplete downloads"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.QUICK
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
+        val batch = ArrayList<ScanItem>()
+        var n = 0
+        for (e in StorageWalker(fs).walkNoting("$root/Download", notes)) {
+            if (++n % 256 == 0) currentCoroutineContext().ensureActive()
+            if (e.stat.type != FsType.FILE || e.stat.size <= 0L) continue
+            val ext = e.name.substringAfterLast('.', "").lowercase()
+            val strong = ext in STRONG_PARTIAL_EXT
+            if (!strong && ext !in WEAK_PARTIAL_EXT) continue
+            val ageDays = (nowMs() - e.stat.mtimeMs) / DAY_MS
+            if (ageDays < minAgeDays) continue
+            batch += ScanItem(
+                path = e.path,
+                sizeBytes = e.stat.size,
+                category = CleaningCategory.TEMP_FILE,
+                reasonForFlagging = (if (strong) "Partial-download file (.$ext)" else "Temporary-style file (.$ext)") +
+                    " in Downloads, untouched for $ageDays days. Contents were not inspected.",
+                confidence = if (strong) ConfidenceLevel.MEDIUM else ConfidenceLevel.LOW,
+                risk = RiskLevel.ELEVATED,
+                deleteMode = DeleteMode.FILE,
+                reversibility = Reversibility.RE_DOWNLOADABLE,
+                lastModified = e.stat.mtimeMs,
+                fingerprint = e.stat
+            )
+            if (batch.size >= BATCH_SIZE) {
+                emit(batch.toList())
+                batch.clear()
+            }
+        }
+        incomplete = notes.reasons()
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+
+    companion object {
+        val STRONG_PARTIAL_EXT = setOf("crdownload", "part", "partial")
+        val WEAK_PARTIAL_EXT = setOf("tmp", "download")
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/ThumbnailScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsProbe
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * The folder NAME alone is not evidence. Flagged only if the folder is a real directory that contains
+ * only small regular files (<= 2 MB each) and no sub-folders, i.e. it looks like a thumbnail cache and
+ * not like someone's album. Never pre-selected.
+ */
+class ThumbnailScanner(
+    private val fs: FsOps,
+    private val root: String = PathRules.ROOT
+) : Scanner {
+    override val id = "thumbnails"
+    override val displayName = "Thumbnail cache"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.QUICK
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val dir = "$root/DCIM/.thumbnails"
+        val st = when (val p = fs.probe(dir)) {
+            is FsProbe.Found -> p.stat
+            FsProbe.Missing -> return@flow // no such folder: nothing to report
+            FsProbe.Denied, FsProbe.Error -> {
+                incomplete = listOf("The thumbnail folder could not be examined")
+                return@flow
+            }
+        }
+        if (st.type != FsType.DIRECTORY) return@flow
+
+        var files = 0
+        var bytes = 0L
+        var looksLikeCache = true
+        val notes = WalkNotes()
+        val walker = StorageWalker(fs)
+        // "Only small files, no sub-folders" must be KNOWN to hold: a part that was cut off or could not be read is
+        // unknown, so the folder is not called a cache.
+        val entries = walker.walk(
+            dir,
+            onTruncated = { looksLikeCache = false; notes.onTruncated() },
+            onUnreadable = { looksLikeCache = false; notes.onUnreadable() }
+        )
+        for (e in entries) {
+            if ((files + 1) % 256 == 0) currentCoroutineContext().ensureActive()
+            if (e.stat.type != FsType.FILE || e.stat.size > MAX_THUMB_BYTES) {
+                looksLikeCache = false
+                break
+            }
+            files++
+            bytes += e.stat.size
+        }
+        incomplete = notes.reasons()
+        if (!looksLikeCache || files == 0 || bytes <= 0L) return@flow
+
+        emit(
+            listOf(
+                ScanItem(
+                    path = dir,
+                    sizeBytes = bytes,
+                    category = CleaningCategory.THUMBNAIL,
+                    reasonForFlagging = "Legacy gallery thumbnail folder: $files small files (none over 2 MB), " +
+                        "no sub-folders. Gallery apps rebuild thumbnails when needed.",
+                    confidence = ConfidenceLevel.MEDIUM,
+                    risk = RiskLevel.SAFE,
+                    deleteMode = DeleteMode.CONTENTS_ONLY,
+                    reversibility = Reversibility.TRIVIALLY_RECREATABLE,
+                    lastModified = st.mtimeMs,
+                    fingerprint = st
+                )
+            )
+        )
+    }.flowOn(Dispatchers.IO)
+
+    private companion object {
+        const val MAX_THUMB_BYTES = 2L * 1024 * 1024
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/LargeFileScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import java.util.PriorityQueue
+
+/**
+ * Finds big files so YOU can decide. Large does not mean junk: confidence UNKNOWN, risk DANGEROUS,
+ * never pre-selected. Keeps only the [topN] largest in a bounded heap, so memory stays flat.
+ */
+class LargeFileScanner(
+    private val fs: FsOps,
+    private val root: String = PathRules.ROOT,
+    private val thresholdBytes: Long = 100L * 1024 * 1024,
+    private val topN: Int = 200
+) : Scanner {
+    override val id = "large_files"
+    override val displayName = "Large files"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.ON_DEMAND
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
+        val heap = PriorityQueue<ScanItem>(compareBy<ScanItem> { it.sizeBytes })
+        var n = 0
+        for (dir in ROOTS) {
+            for (e in StorageWalker(fs).walkNoting("$root/$dir", notes)) {
+                if (++n % 256 == 0) currentCoroutineContext().ensureActive()
+                if (e.stat.type != FsType.FILE || e.stat.size < thresholdBytes) continue
+                heap.add(
+                    ScanItem(
+                        path = e.path,
+                        sizeBytes = e.stat.size,
+                        category = CleaningCategory.LARGE_FILE,
+                        reasonForFlagging = "Large file. Size alone does not mean it is unneeded; " +
+                            "open it and decide for yourself.",
+                        confidence = ConfidenceLevel.UNKNOWN,
+                        risk = RiskLevel.DANGEROUS,
+                        deleteMode = DeleteMode.FILE,
+                        reversibility = Reversibility.NOT_REVERSIBLE,
+                        lastModified = e.stat.mtimeMs,
+                        fingerprint = e.stat
+                    )
+                )
+                if (heap.size > topN) heap.poll()
+            }
+        }
+        incomplete = notes.reasons()
+        if (heap.isNotEmpty()) emit(heap.sortedByDescending { it.sizeBytes })
+    }.flowOn(Dispatchers.IO)
+
+    companion object {
+        val ROOTS = listOf("Download", "DCIM", "Pictures", "Movies", "Documents", "Music")
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/TikTokScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.privileged.PrivilegedOperation
+import java.util.concurrent.TimeUnit
+
+/**
+ * TikTok's video cache and music cache under Android/data, files older than 7 days.
+ *
+ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
+ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
+ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
+ */
+class TikTokScanner(
+    backend: FileReadBackend,
+    inventory: PackageInventory,
+    private val storage: String,
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
+
+    override val id = "tiktok_forensics"
+    override val displayName = "TikTok Forensics"
+    override val requirement = Requirement.SHIZUKU
+    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+    override val mode = ScanMode.ON_DEMAND
+
+    override val packages = listOf("com.zhiliaoapp.musically", "com.zhiliaoapp.musically.go")
+
+    override fun targets(pkg: String): List<Target> = listOf(
+        Target(
+            dir = "$storage/Android/data/$pkg/cache",
+            reason = "A cached TikTok video.",
+            minAgeMs = TimeUnit.DAYS.toMillis(7),
+            confidence = ConfidenceLevel.HIGH,
+            risk = RiskLevel.SAFE
+        ),
+        Target(
+            dir = "$storage/Android/data/$pkg/files/.music",
+            reason = "Cached TikTok music.",
+            minAgeMs = TimeUnit.DAYS.toMillis(7),
+            confidence = ConfidenceLevel.HIGH,
+            risk = RiskLevel.SAFE
+        )
+    )
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/TelegramScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.RiskLevel
+import java.util.concurrent.TimeUnit
+
+/** Telegram's four media folders under Android/media, files older than 14 days. Never pre-selected. */
+class TelegramScanner(
+    backend: FileReadBackend,
+    inventory: PackageInventory,
+    private val storage: String,
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
+
+    override val id = "telegram_forensics"
+    override val displayName = "Telegram Forensics"
+
+    // Android/media is reachable with All-files access; no Shizuku needed.
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.ON_DEMAND
+
+    override val packages = listOf("org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.plus")
+
+    override fun targets(pkg: String): List<Target> {
+        val base = "$storage/Android/media/$pkg/Telegram"
+        fun folder(name: String, what: String) = Target(
+            dir = "$base/$name",
+            reason = "$what that Telegram downloaded to this phone.",
+            minAgeMs = TimeUnit.DAYS.toMillis(14),
+            confidence = ConfidenceLevel.MEDIUM,
+            risk = RiskLevel.ELEVATED
+        )
+        return listOf(
+            folder("Telegram Video", "A video"),
+            folder("Telegram Audio", "An audio file"),
+            folder("Telegram Images", "An image"),
+            folder("Telegram Documents", "A document")
+        )
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/CacheScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.FsResult
+import com.cleanforge.core.backend.InstallState
+import com.cleanforge.core.backend.MIN_PLAUSIBLE_PACKAGES
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.backend.reasonOrNull
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.ProtectedApps
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import com.cleanforge.core.model.SizeQuality
+import com.cleanforge.core.privileged.PrivilegedOperation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * Evidence for "safe to clear" (all of): the OS names Android/data/<pkg>/cache as that app's disposable external
+ * cache (Context.getExternalCacheDir), AND <pkg> is CURRENTLY INSTALLED for this user. "Known to Android" is not
+ * enough: a package uninstalled with its data kept is still known, but its folder is retained data, not a cache
+ * of a running app, so it is never offered here (and CorpseScanner does not call it a leftover either).
+ * Clears CONTENTS only; the folder stays.
+ * Needs Shizuku because Android 11+ hides Android/data from normal apps, even with All-files access.
+ *
+ * Sizes are MEASURED logical bytes. If the walk was cut short or a sub-folder was unreadable the item says so
+ * ([SizeQuality.LOWER_BOUND]). Anything that could not be checked is reported through [incompleteReasons]; an empty
+ * result with reasons means "could not check", not "nothing to clean".
+ */
+class CacheScanner(
+    private val backend: FileReadBackend,
+    private val inventory: PackageInventory,
+    private val root: String = PathRules.ROOT
+) : Scanner {
+    override val id = "cache"
+    override val displayName = "App caches"
+    override val requirement = Requirement.SHIZUKU
+    override val mode = ScanMode.QUICK
+    override val privilegedOperations = setOf(
+        PrivilegedOperation.LIST_EXTERNAL_APP_DATA,
+        PrivilegedOperation.MEASURE_EXTERNAL_APP_DIR
+    )
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val known = inventory.knownPackageNames()
+        if (known == null || known.size < MIN_PLAUSIBLE_PACKAGES) {
+            incomplete = listOf("Android's list of installed apps could not be read or looks incomplete, so no app cache could be verified")
+            return@flow
+        }
+
+        val dataRoot = "$root/Android/data"
+        val listing = when (val r = backend.list(dataRoot)) {
+            is FsResult.Ok -> r.value
+            else -> {
+                incomplete = listOf("Android/data could not be listed (${r.reasonOrNull() ?: "folder not found"})")
+                return@flow
+            }
+        }
+
+        var unclassified = 0
+        var unmeasured = 0
+        var stoppedBecause: String? = null
+        val batch = ArrayList<ScanItem>()
+        for (pkg in listing.names) {
+            currentCoroutineContext().ensureActive()
+            if (!PathRules.isValidPackageName(pkg) || pkg !in known) continue
+            // `known` includes data-kept uninstalls (MATCH_UNINSTALLED_PACKAGES). Installed-ness is a separate question,
+            // and a failed query is UNKNOWN, which must never be read as "installed".
+            val state = inventory.installState(pkg)
+            if (state == InstallState.UNKNOWN) {
+                unclassified++
+                continue
+            }
+            if (state != InstallState.INSTALLED) continue
+
+            val cacheDir = "$dataRoot/$pkg/cache"
+            val stat = backend.lstat(cacheDir)
+            if (stat is FsResult.Unavailable) {
+                stoppedBecause = stat.why
+                break
+            }
+            if (stat !is FsResult.Ok) {
+                if (stat !is FsResult.NotFound) unmeasured++ // NotFound: this app simply has no cache folder
+                continue
+            }
+            val st = stat.value
+            if (st.type != FsType.DIRECTORY) continue
+
+            val sizeRes = backend.directorySize(cacheDir)
+            if (sizeRes is FsResult.Unavailable) {
+                stoppedBecause = sizeRes.why
+                break
+            }
+            if (sizeRes !is FsResult.Ok) {
+                unmeasured++
+                continue
+            }
+            val size = sizeRes.value
+            if (size.bytes <= 0L) {
+                if (!size.isExact) unmeasured++ // could not see inside: unknown, not "empty"
+                continue
+            }
+            val messaging = pkg in ProtectedApps.MESSAGING
+            batch += ScanItem(
+                path = cacheDir,
+                sizeBytes = size.bytes,
+                category = CleaningCategory.APP_CACHE,
+                reasonForFlagging = "Android designates this as the disposable cache of $pkg, which is installed; the app rebuilds it " +
+                    "and the system may clear it when space runs low." +
+                    (if (messaging) " Messaging app: not pre-selected." else "") +
+                    (if (size.isExact) "" else " The size is a lower bound: part of the folder could not be read or is very large."),
+                confidence = if (messaging) ConfidenceLevel.MEDIUM else ConfidenceLevel.HIGH,
+                risk = RiskLevel.SAFE,
+                owningPackage = pkg,
+                requiresShizuku = true,
+                deleteMode = DeleteMode.CONTENTS_ONLY,
+                reversibility = Reversibility.TRIVIALLY_RECREATABLE,
+                lastModified = st.mtimeMs,
+                fingerprint = st,
+                sizeQuality = if (size.isExact) SizeQuality.MEASURED else SizeQuality.LOWER_BOUND,
+                unreadableCount = size.unreadable
+            )
+            if (batch.size >= BATCH_SIZE) {
+                emit(batch.toList())
+                batch.clear()
+            }
+        }
+
+        val notes = ArrayList<String>()
+        if (listing.truncated) notes += "Android/data has more folders than could be listed; some apps were not checked"
+        if (unclassified > 0) notes += "$unclassified app(s) could not be classified as installed or not and were skipped"
+        if (unmeasured > 0) notes += "$unmeasured cache folder(s) could not be examined or measured and were skipped"
+        stoppedBecause?.let { notes += "The scan stopped early: $it" }
+        incomplete = notes
+
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/WhatsAppScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.RiskLevel
+import java.util.concurrent.TimeUnit
+
+/**
+ * WhatsApp and WhatsApp Business, whichever is installed (both, if both are). Only the exact folders below are looked
+ * at, and only single files in them; everything else in WhatsApp's folders is the user's chat data and is left alone.
+ * The same allowlist is enforced a second time by SafetyValidator, so a scanner bug cannot widen it.
+ */
+class WhatsAppScanner(
+    backend: FileReadBackend,
+    inventory: PackageInventory,
+    private val storage: String,
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
+
+    override val id = "whatsapp_forensics"
+    override val displayName = "WhatsApp Forensics"
+
+    // Android/media is reachable with All-files access; no Shizuku needed.
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.ON_DEMAND
+
+    override val packages = listOf("com.whatsapp", "com.whatsapp.w4b")
+
+    override fun targets(pkg: String): List<Target> {
+        val whatsapp = "$storage/Android/media/$pkg/WhatsApp"
+        val media = "$whatsapp/Media"
+
+        // Sent media is a copy WhatsApp kept; it is the only copy if the user never saved it to the Gallery.
+        fun sent(folder: String, what: String) = Target(
+            dir = "$media/$folder/Sent",
+            reason = "$what that WhatsApp kept when you sent it. It may be the only copy if it is not in your Gallery.",
+            minAgeMs = 0L,
+            confidence = ConfidenceLevel.MEDIUM,
+            risk = RiskLevel.ELEVATED
+        )
+
+        return listOf(
+            Target(
+                dir = "$media/.Statuses",
+                reason = "A WhatsApp Status that expired more than 24 hours ago.",
+                minAgeMs = TimeUnit.HOURS.toMillis(24),
+                confidence = ConfidenceLevel.HIGH,
+                risk = RiskLevel.SAFE
+            ),
+            sent("WhatsApp Video", "A video"),
+            sent("WhatsApp Images", "An image"),
+            sent("WhatsApp Animated Gifs", "An animated GIF"),
+            Target(
+                dir = "$whatsapp/Databases",
+                reason = "An old WhatsApp chat backup. The newest backup is always kept.",
+                minAgeMs = TimeUnit.DAYS.toMillis(7),
+                confidence = ConfidenceLevel.MEDIUM,
+                risk = RiskLevel.ELEVATED,
+                // Dated backups only ("msgstore-2026-08-01..."): never the live "msgstore.db.crypt14" or wa.db.
+                nameFilter = { it.startsWith("msgstore-") },
+                keepNewest = 1
+            )
+        )
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/WalkNotes.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.fs.WalkLimits
+
+/**
+ * Collects why a filesystem walk may have missed something, for [Scanner.incompleteReasons]. An empty result with
+ * reasons means "could not check everything", never "nothing found".
+ */
+internal class WalkNotes {
+    private var wasTruncated = false
+    private var unreadable = 0
+
+    fun onTruncated() {
+        wasTruncated = true
+    }
+
+    fun onUnreadable() {
+        unreadable++
+    }
+
+    fun reasons(): List<String> = buildList {
+        if (wasTruncated) add("A folder is deeper or larger than the scan limit; some files were not checked")
+        if (unreadable > 0) {
+            add("$unreadable item(s) could not be read, or sit on another storage volume, and were skipped")
+        }
+    }
+}
+
+/** [StorageWalker.walk] that records truncation and unreadable entries in [notes]. */
+internal fun StorageWalker.walkNoting(
+    root: String,
+    notes: WalkNotes,
+    skipDir: (String) -> Boolean = { false },
+    limits: WalkLimits = WalkLimits()
+): Sequence<StorageWalker.Entry> = walk(root, limits, skipDir, notes::onTruncated, notes::onUnreadable)
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/Scanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.model.ScanItem
+import com.cleanforge.core.privileged.PrivilegedOperation
+import kotlinx.coroutines.flow.Flow
+
+enum class Requirement { NONE, ALL_FILES_ACCESS, SHIZUKU }
+
+/** QUICK scanners run on "Scan"; ON_DEMAND ones are heavier and only run when the user asks. */
+enum class ScanMode { QUICK, ON_DEMAND }
+
+/**
+ * A scanner CLASSIFIES: every item it emits must carry the evidence that justifies it.
+ * Filename, extension, or directory name alone is never accepted as evidence.
+ */
+interface Scanner {
+    val id: String
+    val displayName: String
+    val requirement: Requirement
+    val mode: ScanMode
+
+    /** Privileged operations this scanner needs when [requirement] is [Requirement.SHIZUKU]. */
+    val privilegedOperations: Set<PrivilegedOperation> get() = emptySet()
+
+    /** Emits batches so memory stays bounded on low-end devices. */
+    fun scan(): Flow<List<ScanItem>>
+
+    /**
+     * Why the result of the LAST completed [scan] may be incomplete: a failed listing, skipped items, a lower-bound
+     * size. Empty means nothing was left out. An empty result with a non-empty reason list is "could not check", never
+     * "nothing found". Read it after the flow has completed.
+     */
+    fun incompleteReasons(): List<String> = emptyList()
+}
+
+internal const val BATCH_SIZE = 50
+internal const val DAY_MS = 24L * 60L * 60L * 1000L
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/InstagramScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.privileged.PrivilegedOperation
+import java.util.concurrent.TimeUnit
+
+/**
+ * Instagram media cache under Android/data, files older than 14 days.
+ *
+ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
+ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
+ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
+ */
+class InstagramScanner(
+    backend: FileReadBackend,
+    inventory: PackageInventory,
+    private val storage: String,
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
+
+    override val id = "instagram_forensics"
+    override val displayName = "Instagram Forensics"
+    override val requirement = Requirement.SHIZUKU
+    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+    override val mode = ScanMode.ON_DEMAND
+
+    override val packages = listOf("com.instagram.android", "com.instagram.lite")
+
+    override fun targets(pkg: String): List<Target> = listOf(
+        Target(
+            dir = "$storage/Android/data/$pkg/cache",
+            reason = "Cached Instagram media.",
+            minAgeMs = TimeUnit.DAYS.toMillis(14),
+            confidence = ConfidenceLevel.MEDIUM,
+            risk = RiskLevel.SAFE
+        )
+    )
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/ApkScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * Installer files. The platform parser (not a regex over binary XML, as the old code did) reads the real
+ * package name and version. Evidence for MEDIUM: that package is installed at the same or a NEWER version.
+ * Otherwise LOW (you may still want the installer). Unreadable APKs are skipped (could be mid-download).
+ * Never pre-selected.
+ */
+class ApkScanner(
+    private val fs: FsOps,
+    private val inventory: PackageInventory,
+    private val root: String = PathRules.ROOT
+) : Scanner {
+    override val id = "apk"
+    override val displayName = "APK installers"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.QUICK
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
+        val batch = ArrayList<ScanItem>()
+        var n = 0
+        for (dir in listOf("Download", "Documents")) {
+            for (e in StorageWalker(fs).walkNoting("$root/$dir", notes)) {
+                if (++n % 128 == 0) currentCoroutineContext().ensureActive()
+                if (e.stat.type != FsType.FILE) continue
+                if (!e.name.endsWith(".apk", ignoreCase = true)) continue
+                currentCoroutineContext().ensureActive() // parsing an APK is slow; stay responsive to cancellation
+                val info = inventory.archiveInfo(e.path) ?: continue
+                val installed = inventory.installedVersionCode(info.packageName)
+                val sameOrNewerInstalled = installed != null && installed >= info.versionCode
+                batch += ScanItem(
+                    path = e.path,
+                    sizeBytes = e.stat.size,
+                    category = CleaningCategory.APK_FILE,
+                    reasonForFlagging = if (sameOrNewerInstalled)
+                        "Installer for ${info.packageName} v${info.versionCode}; the installed version " +
+                            "(v$installed) is the same or newer."
+                    else
+                        "Installer for ${info.packageName} v${info.versionCode}. " +
+                            (if (installed == null) "That app is not installed" else "Installed version is older (v$installed)") +
+                            ", so you may still want this file.",
+                    confidence = if (sameOrNewerInstalled) ConfidenceLevel.MEDIUM else ConfidenceLevel.LOW,
+                    risk = RiskLevel.ELEVATED,
+                    owningPackage = info.packageName,
+                    deleteMode = DeleteMode.FILE,
+                    reversibility = Reversibility.RE_DOWNLOADABLE,
+                    lastModified = e.stat.mtimeMs,
+                    fingerprint = e.stat
+                )
+                if (batch.size >= BATCH_SIZE) {
+                    emit(batch.toList())
+                    batch.clear()
+                }
+            }
+        }
+        incomplete = notes.reasons()
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/EmptyDirectoryScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * Folders that are verifiably empty RIGHT NOW (zero entries, hidden files such as .nomedia count as entries).
+ * Only NESTED folders are listed (never Download/DCIM/Pictures/... themselves) and hidden folders are skipped.
+ * Frees 0 bytes: tidy-up only. Deletion uses rmdir, which the OS refuses if anything appeared meanwhile.
+ */
+class EmptyDirectoryScanner(
+    private val fs: FsOps,
+    private val root: String = PathRules.ROOT
+) : Scanner {
+    override val id = "empty_dirs"
+    override val displayName = "Empty folders"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.ON_DEMAND
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
+        val batch = ArrayList<ScanItem>()
+        var n = 0
+        for (dir in listOf("Download", "Documents", "Pictures", "Movies")) {
+            val walker = StorageWalker(fs)
+            for (e in walker.walkNoting("$root/$dir", notes, skipDir = { it.substringAfterLast('/').startsWith(".") })) {
+                if (++n % 256 == 0) currentCoroutineContext().ensureActive()
+                if (e.stat.type != FsType.DIRECTORY || e.name.startsWith(".")) continue
+                val children = fs.list(e.path)
+                if (children == null) { // cannot look inside: unknown, not "empty"
+                    notes.onUnreadable()
+                    continue
+                }
+                if (children.isNotEmpty()) continue
+                batch += ScanItem(
+                    path = e.path,
+                    sizeBytes = 0L,
+                    category = CleaningCategory.EMPTY_DIRECTORY,
+                    reasonForFlagging = "Contains nothing at all. Removing it frees no space; apps recreate folders they need.",
+                    confidence = ConfidenceLevel.MEDIUM,
+                    risk = RiskLevel.SAFE,
+                    deleteMode = DeleteMode.EMPTY_DIR,
+                    reversibility = Reversibility.TRIVIALLY_RECREATABLE,
+                    lastModified = e.stat.mtimeMs,
+                    fingerprint = e.stat
+                )
+                if (batch.size >= BATCH_SIZE) {
+                    emit(batch.toList())
+                    batch.clear()
+                }
+            }
+        }
+        incomplete = notes.reasons()
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/LogScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsOps
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.fs.StorageWalker
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import java.io.FileInputStream
+import java.io.IOException
+
+/**
+ * ".log" alone proves nothing. Evidence required (all): .log extension, real file, not modified for
+ * [minAgeDays] days, and the first bytes actually look like line-oriented text. Only Download/ is scanned
+ * (Documents is personal). Confidence is capped at LOW; always manual review, never pre-selected.
+ */
+class LogScanner(
+    private val fs: FsOps,
+    private val root: String = PathRules.ROOT,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val minAgeDays: Int = 30
+) : Scanner {
+    override val id = "logs"
+    override val displayName = "Old log files"
+    override val requirement = Requirement.ALL_FILES_ACCESS
+    override val mode = ScanMode.ON_DEMAND
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val notes = WalkNotes()
+        val batch = ArrayList<ScanItem>()
+        var n = 0
+        for (e in StorageWalker(fs).walkNoting("$root/Download", notes)) {
+            if (++n % 256 == 0) currentCoroutineContext().ensureActive()
+            if (e.stat.type != FsType.FILE || e.stat.size <= 0L) continue
+            if (!e.name.endsWith(".log", ignoreCase = true)) continue
+            val ageDays = (nowMs() - e.stat.mtimeMs) / DAY_MS
+            if (ageDays < minAgeDays) continue
+            val head = readHead(e.path)
+            if (head == null) { // unreadable: could not be checked, so it is not proposed
+                notes.onUnreadable()
+                continue
+            }
+            if (!looksLikeText(head)) continue
+            batch += ScanItem(
+                path = e.path,
+                sizeBytes = e.stat.size,
+                category = CleaningCategory.LOG_FILE,
+                reasonForFlagging = "Text log file, not modified for $ageDays days. " +
+                    "It may still contain something you want to keep.",
+                confidence = ConfidenceLevel.LOW,
+                risk = RiskLevel.ELEVATED,
+                deleteMode = DeleteMode.FILE,
+                reversibility = Reversibility.NOT_REVERSIBLE,
+                lastModified = e.stat.mtimeMs,
+                fingerprint = e.stat
+            )
+            if (batch.size >= BATCH_SIZE) {
+                emit(batch.toList())
+                batch.clear()
+            }
+        }
+        incomplete = notes.reasons()
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+
+    private fun readHead(path: String): ByteArray? = try {
+        FileInputStream(path).use { ins ->
+            val buf = ByteArray(HEAD_BYTES)
+            var off = 0
+            while (off < buf.size) {
+                val r = ins.read(buf, off, buf.size - off)
+                if (r < 0) break
+                off += r
+            }
+            buf.copyOf(off)
+        }
+    } catch (e: IOException) {
+        null
+    } catch (e: SecurityException) {
+        null
+    }
+
+    companion object {
+        const val HEAD_BYTES = 2048
+
+        /** >= 95% printable/whitespace/UTF-8 bytes, no NUL, and at least one line break. */
+        fun looksLikeText(head: ByteArray): Boolean {
+            if (head.isEmpty()) return false
+            var ok = 0
+            var newline = false
+            for (b in head) {
+                val v = b.toInt() and 0xff
+                if (v == 0) return false
+                if (v == 0x0a) newline = true
+                if (v == 0x09 || v == 0x0a || v == 0x0d || (v in 0x20..0x7e) || v >= 0x80) ok++
+            }
+            return newline && ok * 100 >= head.size * 95
+        }
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/TwitterXScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.privileged.PrivilegedOperation
+import java.util.concurrent.TimeUnit
+
+/**
+ * Twitter/X media cache under Android/data, files older than 7 days.
+ *
+ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
+ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
+ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
+ */
+class TwitterXScanner(
+    backend: FileReadBackend,
+    inventory: PackageInventory,
+    private val storage: String,
+    timeProvider: () -> Long = { System.currentTimeMillis() }
+) : ForensicFolderScanner(backend, inventory, timeProvider) {
+
+    override val id = "twitter_x_forensics"
+    override val displayName = "Twitter/X Forensics"
+    override val requirement = Requirement.SHIZUKU
+    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+    override val mode = ScanMode.ON_DEMAND
+
+    override val packages = listOf("com.twitter.android", "com.twitter.android.lite")
+
+    override fun targets(pkg: String): List<Target> = listOf(
+        Target(
+            dir = "$storage/Android/data/$pkg/cache",
+            reason = "Cached Twitter/X media.",
+            minAgeMs = TimeUnit.DAYS.toMillis(7),
+            confidence = ConfidenceLevel.HIGH,
+            risk = RiskLevel.SAFE
+        )
+    )
+}
+
+----- file: ./app/src/main/java/com/cleanforge/core/scanner/ForensicFolderScanner.kt -----
+package com.cleanforge.core.scanner
+
+import com.cleanforge.core.backend.FileReadBackend
+import com.cleanforge.core.backend.FsResult
+import com.cleanforge.core.backend.InstallState
+import com.cleanforge.core.backend.PackageInventory
+import com.cleanforge.core.fs.DeleteMode
+import com.cleanforge.core.fs.FsStat
+import com.cleanforge.core.fs.FsType
+import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.core.model.ConfidenceLevel
+import com.cleanforge.core.model.ProtectedApps
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.core.model.RiskLevel
+import com.cleanforge.core.model.ScanItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/**
+ * Shared engine of the Part 3 forensic scanners. A subclass only declares WHICH packages and WHICH exact folders;
+ * everything that can go wrong (install state, unreadable folders, cancellation, batching) is handled here once.
+ *
+ * Evidence for an item (all of): the owning package is INSTALLED right now (tri-state [InstallState], never a bare
+ * boolean), the file is a direct child of one allowlisted folder, and it is older than that folder's threshold.
+ * Only regular files are ever proposed (DeleteMode.FILE); sub-folders are counted and reported, never proposed.
+ *
+ * Anything that could not be checked is reported through [incompleteReasons]: an empty result with reasons means
+ * "could not check", not "nothing to clean". Nothing here is ever pre-selected ([ScanItem.isPreselected] is derived
+ * and is false for FORENSIC_MEDIA).
+ */
+abstract class ForensicFolderScanner(
+    private val backend: FileReadBackend,
+    private val inventory: PackageInventory,
+    private val timeProvider: () -> Long
+) : Scanner {
+
+    /** One allowlisted folder. Only its direct child FILES are considered. */
+    protected class Target(
+        val dir: String,
+        val reason: String,
+        val minAgeMs: Long,
+        val confidence: ConfidenceLevel,
+        val risk: RiskLevel,
+        /** Only names that pass are considered at all. */
+        val nameFilter: (String) -> Boolean = { true },
+        /** The newest N files that pass [nameFilter] are never proposed, whatever their age. */
+        val keepNewest: Int = 0
+    )
+
+    /** Packages to look at, in order. Each one is scanned only if it is installed. */
+    protected abstract val packages: List<String>
+
+    /** Absolute folders to inspect for [pkg]. */
+    protected abstract fun targets(pkg: String): List<Target>
+
+    @Volatile private var incomplete: List<String> = emptyList()
+
+    override fun incompleteReasons(): List<String> = incomplete
+
+    private val needsShizuku: Boolean get() = requirement == Requirement.SHIZUKU
+
+    override fun scan(): Flow<List<ScanItem>> = flow {
+        incomplete = emptyList()
+        val now = timeProvider()
+        val batch = ArrayList<ScanItem>()
+        val notes = ArrayList<String>()
+        var unclassified = 0
+        var unreadable = 0
+        var skippedNonFiles = 0
+        var truncated = false
+        var stoppedBecause: String? = null
+
+        packageLoop@ for (pkg in packages) {
+            currentCoroutineContext().ensureActive()
+            when (inventory.installState(pkg)) {
+                InstallState.INSTALLED -> Unit
+                InstallState.UNKNOWN -> {
+                    unclassified++
+                    continue@packageLoop
+                }
+                else -> continue@packageLoop // not installed: nothing of this app is ours to look at
+            }
+
+            for (target in targets(pkg)) {
+                currentCoroutineContext().ensureActive()
+                val listing = when (val r = backend.list(target.dir)) {
+                    is FsResult.Ok -> r.value
+                    FsResult.NotFound -> continue // this app simply has no such folder
+                    is FsResult.Unavailable -> {
+                        stoppedBecause = r.why
+                        break@packageLoop
+                    }
+                    else -> {
+                        unreadable++
+                        continue
+                    }
+                }
+                if (listing.truncated) truncated = true
+
+                val candidates = ArrayList<Pair<String, FsStat>>()
+                for (name in listing.names) {
+                    currentCoroutineContext().ensureActive()
+                    if (!target.nameFilter(name)) continue
+                    val path = "${target.dir}/$name"
+                    when (val s = backend.lstat(path)) {
+                        is FsResult.Ok ->
+                            if (s.value.type == FsType.FILE) candidates += path to s.value else skippedNonFiles++
+                        FsResult.NotFound -> Unit // vanished between list and stat
+                        is FsResult.Unavailable -> {
+                            stoppedBecause = s.why
+                            break@packageLoop
+                        }
+                        else -> unreadable++
+                    }
+                }
+
+                val proposable = candidates
+                    .sortedByDescending { (_, st) -> st.mtimeMs }
+                    .drop(target.keepNewest)
+
+                for ((path, st) in proposable) {
+                    val age = now - st.mtimeMs
+                    if (age < target.minAgeMs) continue // also drops files dated in the future
+                    batch += ScanItem(
+                        path = path,
+                        sizeBytes = st.size,
+                        category = CleaningCategory.FORENSIC_MEDIA,
+                        reasonForFlagging = reasonFor(target, pkg, age),
+                        confidence = target.confidence,
+                        risk = target.risk,
+                        owningPackage = pkg,
+                        requiresShizuku = needsShizuku,
+                        deleteMode = DeleteMode.FILE,
+                        reversibility = Reversibility.NOT_REVERSIBLE,
+                        lastModified = st.mtimeMs,
+                        fingerprint = st
+                    )
+                    if (batch.size >= BATCH_SIZE) {
+                        emit(batch.toList())
+                        batch.clear()
+                    }
+                }
+            }
+        }
+
+        if (unclassified > 0) notes += "$unclassified app(s) could not be classified as installed or not and were skipped"
+        if (unreadable > 0) notes += "$unreadable folder(s) or file(s) could not be read and were skipped"
+        if (skippedNonFiles > 0) notes += "$skippedNonFiles sub-folder(s) were not examined (only single files are offered)"
+        if (truncated) notes += "A folder has more entries than could be listed; some files were not checked"
+        stoppedBecause?.let { notes += "The scan stopped early: $it" }
+        incomplete = notes
+
+        if (batch.isNotEmpty()) emit(batch.toList())
+    }.flowOn(Dispatchers.IO)
+
+    private fun reasonFor(target: Target, pkg: String, ageMs: Long): String = buildString {
+        append(target.reason)
+        if (target.minAgeMs > 0) append(" Last changed ${ageMs / DAY_MS} day(s) ago.")
+        if (pkg in ProtectedApps.MESSAGING) append(" Messaging app: never pre-selected.")
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/CleanForgeApp.kt -----
+package com.cleanforge
+
+import android.app.Application
+import com.cleanforge.core.shizuku.ShizukuManager
+import dagger.hilt.android.HiltAndroidApp
+import javax.inject.Inject
+
+@HiltAndroidApp
+class CleanForgeApp : Application() {
+    @Inject lateinit var shizukuManager: ShizukuManager
+
+    override fun onCreate() {
+        super.onCreate()
+        shizukuManager.register()
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/WarmFab.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
+
+@Composable
+fun WarmFab(
+    visible: Boolean,
+    count: Int,
+    sizeLabel: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalWarmPalette.current
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
+
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(250)) + slideInVertically(spring(0.5f, 500f)) { it } + scaleIn(spring(0.5f, 500f)),
+        exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it } + scaleOut(tween(200)),
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(palette.fabBg)
+                .clickable(interactionSource = interaction, indication = null) {
+                    haptics(Haptic.Medium)
+                    onClick()
+                }
+                .padding(horizontal = 22.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Review",
+                style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                color = palette.fabText,
+            )
+            Spacer(Modifier.width(9.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(palette.fabBadge)
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    count.toString(),
+                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = palette.fabBadgeText,
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            Text(
+                sizeLabel,
+                style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                color = palette.fabText.copy(alpha = 0.75f),
+            )
+        }
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/WarmDock.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
+
+data class DockItem(val key: String, val label: String, val icon: ImageVector)
+
+@Composable
+fun WarmDock(
+    items: List<DockItem>,
+    selectedKey: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalWarmPalette.current
+    val haptics = rememberHaptics()
+    val density = LocalDensity.current
+    var itemOffsets by remember { mutableStateOf(List(items.size) { 0f }) }
+    var itemWidths by remember { mutableStateOf(List(items.size) { 0f }) }
+
+    val selectedIndex = items.indexOfFirst { it.key == selectedKey }.coerceAtLeast(0)
+    val targetOffset = itemOffsets.getOrElse(selectedIndex) { 0f }
+    val targetWidth = itemWidths.getOrElse(selectedIndex) { 0f }
+
+    val pillX by animateFloatAsState(
+        targetValue = targetOffset,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 320f),
+        label = "pillX",
+    )
+    val pillW by animateFloatAsState(
+        targetValue = targetWidth,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 320f),
+        label = "pillW",
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .shadow(
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(999.dp),
+                    ambientColor = Color(0x33000000),
+                    spotColor = Color(0x55000000),
+                )
+                .clip(RoundedCornerShape(999.dp))
+                .background(palette.dockBg)
+                .border(1.dp, palette.dockBorder, RoundedCornerShape(999.dp)),
+        )
+        Box(
+            modifier = Modifier
+                .padding(start = 6.dp, top = 6.dp, bottom = 6.dp)
+                .offset { IntOffset(pillX.toInt(), 0) }
+                .width(with(density) { pillW.toDp() })
+                .height(52.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(palette.claySoft),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items.forEachIndexed { i, item ->
+                val selected = item.key == selectedKey
+                val tint by animateColorAsState(
+                    targetValue = if (selected) palette.clay2 else palette.ink3,
+                    label = "tint",
+                )
+                val iconScale by animateFloatAsState(
+                    targetValue = if (selected) 1.08f else 1f,
+                    animationSpec = spring(dampingRatio = 0.4f, stiffness = 700f),
+                    label = "iconScale",
+                )
+                val interaction = remember { MutableInteractionSource() }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(999.dp))
+                        .onGloballyPositioned { c ->
+                            itemOffsets = itemOffsets.toMutableList().also {
+                                it[i] = c.positionInParent().x
+                            }
+                            itemWidths = itemWidths.toMutableList().also {
+                                it[i] = c.size.width.toFloat()
+                            }
+                        }
+                        .clickable(interactionSource = interaction, indication = null) {
+                            if (!selected) {
+                                haptics(Haptic.Light)
+                                onSelect(item.key)
+                            }
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        tint = tint,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = item.label,
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = tint,
+                    )
+                }
+            }
+        }
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/WarmSheet.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.layout.navigationBarsPadding
+import android.view.ViewGroup
+import android.view.Gravity
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.cleanforge.ui.theme.LocalWarmPalette
+
+@Composable
+fun WarmSheet(
+    onDismiss: () -> Unit,
+    title: String,
+    subtitle: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val palette = LocalWarmPalette.current
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    val progress by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 260f),
+        label = "sheetIn",
+    )
+    val overlayAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(280), label = "overlay",
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        // A Compose dialog window wraps its content and is centred by default; on some phones that left the sheet
+        // halfway up the screen. Make the window fill the screen and anchor the sheet to the bottom.
+        val view = LocalView.current
+        SideEffect {
+            (view.parent as? DialogWindowProvider)?.window?.let { w ->
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                w.setGravity(Gravity.BOTTOM)
+                w.setDimAmount(0f) // the Warm scrim below does the dimming
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(palette.overlayScrim.copy(alpha = palette.overlayScrim.alpha * overlayAlpha))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss,
+                ),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { translationY = (1f - progress) * 60.dp.toPx() }
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .background(palette.surface)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(top = 12.dp, bottom = 28.dp)
+                    .verticalScroll(rememberScrollState())
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(palette.line),
+                )
+                Spacer(Modifier.height(20.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = palette.ink,
+                )
+                if (subtitle != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.ink2,
+                    )
+                }
+                Spacer(Modifier.height(20.dp))
+                content()
+            }
+        }
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/RamGuage.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.theme.Fraunces
+
+@Composable
+fun RamGauge(usedFraction: Float, modifier: Modifier = Modifier) {
+    val palette = LocalWarmPalette.current
+    var animate by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(usedFraction) { animate = usedFraction }
+    val progress by animateFloatAsState(animate, tween(1400), label = "ramArc")
+
+    val pressureColor = when {
+        usedFraction > 0.85f -> palette.brick
+        usedFraction > 0.7f -> palette.clay
+        usedFraction > 0.5f -> palette.amber
+        else -> palette.sage
+    }
+    val ringColor by animateColorAsState(pressureColor, tween(500), label = "ringColor")
+
+    val pressureLabel = when {
+        usedFraction > 0.85f -> "Critical"
+        usedFraction > 0.7f -> "High"
+        usedFraction > 0.5f -> "Moderate"
+        else -> "Low"
+    }
+
+    Box(modifier = modifier.size(180.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(180.dp)) {
+            val stroke = 10.dp.toPx()
+            val inset = stroke / 2 + 1f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            val topLeft = Offset(inset, inset)
+            drawArc(
+                color = palette.surface3,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                topLeft = topLeft, size = arcSize,
+                style = Stroke(width = stroke),
+            )
+            drawArc(
+                color = ringColor,
+                startAngle = -90f, sweepAngle = 360f * progress, useCenter = false,
+                topLeft = topLeft, size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "${(usedFraction * 100).toInt()}%",
+                fontFamily = Fraunces,
+                fontSize = 44.sp,
+                color = palette.ink,
+            )
+            Text(
+                text = pressureLabel.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.ink3,
+                letterSpacing = 1.6.sp,
+            )
+        }
+    }
+}
+
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/CounterHeading.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+
+/** Per-letter counter animation — each letter rolls up from below with 26ms stagger. */
+@Composable
+fun CounterHeading(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    letterDelayMs: Long = 26L,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clipToBounds()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        text.forEachIndexed { i, ch ->
+            val progress = remember(text) { Animatable(0f) }
+            LaunchedEffect(text, i) {
+                progress.snapTo(0f)
+                delay(i * letterDelayMs)
+                progress.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 500f))
+            }
+            Text(
+                text = if (ch == ' ') "\u00A0" else ch.toString(),
+                style = style,
+                color = color,
+                modifier = Modifier.graphicsLayer {
+                    translationY = (1f - progress.value) * 48f
+                    alpha = progress.value
+                },
+            )
+        }
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/WarmCard.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.cleanforge.ui.theme.LocalWarmPalette
+
+@Composable
+fun WarmCard(
+    modifier: Modifier = Modifier,
+    bg: Color? = null,
+    border: Color? = null,
+    radius: Dp = 22.dp,
+    padding: Dp = 20.dp,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val palette = LocalWarmPalette.current
+    val bgColor = bg ?: palette.surface
+    val borderColor = border ?: palette.line2
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .clip(RoundedCornerShape(radius))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(radius))
+            .padding(padding),
+        content = content,
+    )
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/HeroRing.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
+import com.cleanforge.ui.theme.LocalWarmPalette
+
+@Composable
+fun HeroRing(usedFraction: Float, modifier: Modifier = Modifier) {
+    val palette = LocalWarmPalette.current
+    var animate by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(usedFraction) { animate = usedFraction }
+    val progress by animateFloatAsState(
+        targetValue = animate,
+        animationSpec = tween(1400),
+        label = "heroArc",
+    )
+
+    Box(modifier = modifier.size(100.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(100.dp)) {
+            val stroke = 7.dp.toPx()
+            val inset = stroke / 2 + 1f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            val topLeft = Offset(inset, inset)
+            // track
+            drawArc(
+                color = palette.surface3,
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                topLeft = topLeft, size = arcSize,
+                style = Stroke(width = stroke),
+            )
+            // progress
+            drawArc(
+                color = palette.clay,
+                startAngle = -90f, sweepAngle = 360f * progress, useCenter = false,
+                topLeft = topLeft, size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Text(
+            text = "${(usedFraction * 100).toInt()}%",
+            style = MaterialTheme.typography.titleLarge.copy(
+                fontSize = androidx.compose.ui.unit.TextUnit(22f, androidx.compose.ui.unit.TextUnitType.Sp),
+            ),
+            color = palette.ink,
+        )
+    }
+}
+
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/StorageBreakdownCard.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.cleanforge.domain.usecase.StorageBreakdown
+import com.cleanforge.domain.usecase.StorageCategory
+import com.cleanforge.ui.StorageUi
+import com.cleanforge.ui.formatBytes
+import com.cleanforge.ui.theme.LocalWarmPalette
+
+/**
+ * The card tucked behind the storage hero: it slides down from under it when the hero is tapped. Each category can
+ * be opened again for its sub-categories (folders, apps, cache types).
+ */
+@Composable
+fun StorageBreakdownCard(storage: StorageUi, onRetry: () -> Unit) {
+    val palette = LocalWarmPalette.current
+    var openKey by remember { mutableStateOf<String?>(null) }
+
+    AnimatedVisibility(
+        visible = storage.expanded,
+        enter = expandVertically(spring(dampingRatio = 0.85f, stiffness = 300f)) + fadeIn(tween(220)),
+        exit = shrinkVertically(tween(260)) + fadeOut(tween(160)),
+    ) {
+        // Pulled up so its top edge starts behind the hero (the hero is drawn above it).
+        Box(Modifier.offset(y = (-24).dp)) {
+            WarmCard(bg = palette.surface2, border = palette.line2, padding = 18.dp) {
+                Spacer(Modifier.height(22.dp))
+                val breakdown = storage.breakdown
+                when {
+                    breakdown == null && storage.loading ->
+                        Text("Measuring…", style = MaterialTheme.typography.bodyMedium, color = palette.ink3)
+                    breakdown == null -> {
+                        Text(
+                            storage.error ?: "Nothing measured yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.ink2,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        WarmButton(text = "Try again", onClick = onRetry, style = WarmBtnStyle.Soft, small = true)
+                    }
+                    else -> BreakdownList(breakdown, openKey) { key -> openKey = if (openKey == key) null else key }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BreakdownList(breakdown: StorageBreakdown, openKey: String?, onToggle: (String) -> Unit) {
+    val palette = LocalWarmPalette.current
+    val max = breakdown.categories.maxOfOrNull { it.bytes }?.coerceAtLeast(1L) ?: 1L
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        breakdown.categories.forEach { cat ->
+            CategoryRow(cat, fraction = cat.bytes.toFloat() / max, open = openKey == cat.key) { onToggle(cat.key) }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("System and other", style = MaterialTheme.typography.bodyMedium, color = palette.ink)
+                Text(
+                    "Android's own files and anything apps cannot see.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.ink3,
+                )
+            }
+            Text(formatBytes(breakdown.otherBytes), style = MaterialTheme.typography.bodyMedium, color = palette.ink2)
+        }
+    }
+}
+
+@Composable
+private fun CategoryRow(cat: StorageCategory, fraction: Float, open: Boolean, onClick: () -> Unit) {
+    val palette = LocalWarmPalette.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .animateContentSize(spring(dampingRatio = 0.9f, stiffness = 400f))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                cat.label,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = palette.ink,
+            )
+            Text(formatBytes(cat.bytes), style = MaterialTheme.typography.bodyMedium, color = palette.ink2)
+            Spacer(Modifier.width(8.dp))
+            Text(if (open) "▴" else "▾", color = palette.ink3)
+        }
+        Spacer(Modifier.height(6.dp))
+        Bar(fraction)
+        if (open) {
+            Spacer(Modifier.height(10.dp))
+            if (cat.slices.isEmpty()) {
+                Text("Nothing to list.", style = MaterialTheme.typography.bodySmall, color = palette.ink3)
+            }
+            val sliceMax = cat.slices.maxOfOrNull { it.bytes }?.coerceAtLeast(1L) ?: 1L
+            cat.slices.forEach { s ->
+                Row(Modifier.padding(start = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.label, style = MaterialTheme.typography.bodySmall, color = palette.ink)
+                        Spacer(Modifier.height(3.dp))
+                        Bar(s.bytes.toFloat() / sliceMax, thin = true)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(formatBytes(s.bytes), style = MaterialTheme.typography.bodySmall, color = palette.ink2)
+                }
+            }
+            cat.note?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = palette.ink3)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun Bar(fraction: Float, thin: Boolean = false) {
+    val palette = LocalWarmPalette.current
+    val h = if (thin) 4.dp else 6.dp
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(h)
+            .clip(RoundedCornerShape(h))
+            .background(palette.line),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(fraction.coerceIn(0.02f, 1f))
+                .height(h)
+                .clip(RoundedCornerShape(h))
+                .background(if (thin) palette.sage else palette.clay),
+        )
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/WarmSwitch.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
+
+@Composable
+fun WarmSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalWarmPalette.current
+    val haptics = rememberHaptics()
+    val track by animateColorAsState(
+        targetValue = if (checked) palette.clay else palette.surface3,
+        label = "track",
+    )
+    val border by animateColorAsState(
+        targetValue = if (checked) palette.clay else palette.line,
+        label = "border",
+    )
+    val thumbColor by animateColorAsState(
+        targetValue = if (checked) palette.tickOnClay else Color.White,
+        label = "thumb",
+    )
+    val thumbPos by animateFloatAsState(
+        targetValue = if (checked) 18f else 0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 700f),
+        label = "thumbPos",
+    )
+    val interaction = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = modifier
+            .size(width = 46.dp, height = 28.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(track)
+            .border(1.dp, border, RoundedCornerShape(999.dp))
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+            ) {
+                haptics(Haptic.Light)
+                onCheckedChange(!checked)
+            },
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = (2 + thumbPos).dp)
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(thumbColor),
+        )
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/StatusCards.kt -----
+package com.cleanforge.ui.components
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.cleanforge.core.privileged.CapabilityReport
+import com.cleanforge.core.privileged.CapabilityStatus
+import com.cleanforge.core.privileged.OperationCapability
+import com.cleanforge.core.shizuku.ShizukuManager
+import com.cleanforge.core.shizuku.ShizukuState
+import com.cleanforge.ui.formatBytes
+import java.text.DateFormat
+import java.util.Date
+
+fun openAllFilesSettings(context: Context) {
+    val uri = Uri.parse("package:${context.packageName}")
+    try {
+        context.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri))
+    } catch (e: Exception) {
+        runCatching { context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+    }
+}
+
+fun openShizukuApp(context: Context) {
+    val intent = context.packageManager.getLaunchIntentForPackage(ShizukuManager.SHIZUKU_PACKAGE)
+    if (intent != null) runCatching { context.startActivity(intent) }
+}
+
+@Composable
+fun StorageHero(freeBytes: Long, totalBytes: Long, usedFraction: Float, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Row(
+            Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { usedFraction },
+                    modifier = Modifier.size(96.dp),
+                    strokeWidth = 9.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+                Text(
+                    "${(usedFraction * 100).toInt()}%",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+            Column {
+                Text(
+                    formatBytes(freeBytes),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    "free of ${formatBytes(totalBytes)}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoCard(
+    title: String,
+    body: String,
+    icon: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    action: @Composable (() -> Unit)? = null
+) {
+    Card(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                icon()
+                Text(title, style = MaterialTheme.typography.titleMedium)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (action != null) {
+                Spacer(Modifier.height(12.dp))
+                action()
+            }
+        }
+    }
+}
+
+@Composable
+fun AllFilesCard(onOpenSettings: () -> Unit) {
+    InfoCard(
+        title = "Allow access to files",
+        body = "CleanForge needs All-files access to list and delete things in shared storage. " +
+            "It only deletes items you select and confirm, and the app has no internet permission.",
+        icon = { Icon(Icons.Default.FolderOpen, null, tint = MaterialTheme.colorScheme.primary) },
+        action = { FilledTonalButton(onClick = onOpenSettings) { Text("Open settings") } }
+    )
+}
+
+@Composable
+fun ShizukuCard(
+    state: ShizukuState,
+    report: CapabilityReport?,
+    onRequestPermission: () -> Unit,
+    onOpenShizuku: () -> Unit,
+    onRecheck: () -> Unit
+) {
+    val icon: @Composable () -> Unit = { Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary) }
+    when (state) {
+        is ShizukuState.Authorized -> {
+            InfoCard(
+                title = "Shizuku is running and CleanForge may use it",
+                body = (if (state.isRoot)
+                    "Running in root mode. CleanForge still only touches the exact folders it explains to you."
+                else
+                    "Running in shell mode (not root). The shell user can reach Android/data and Android/obb but not other apps' private data.") +
+                    " This alone does not prove that every cleanup works on your phone; the checks below do.",
+                icon = icon
+            )
+            if (report != null) CapabilityCard(report, onRecheck)
+        }
+        ShizukuState.NotInstalled -> InfoCard(
+            title = "Shizuku is optional",
+            body = "Without it, Android 11+ hides other apps' cache folders (Android/data), so those cleaners are " +
+                "switched off. Everything else works. Install and start Shizuku, then come back.",
+            icon = icon,
+            action = { OutlinedButton(onClick = onRecheck) { Text("Check again") } }
+        )
+        ShizukuState.NotRunning -> InfoCard(
+            title = "Shizuku is not running",
+            body = "Start Shizuku (wireless debugging or adb), then return here. It is not root.",
+            icon = icon,
+            action = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") }
+                    OutlinedButton(onClick = onRecheck) { Text("Check again") }
+                }
+            }
+        )
+        ShizukuState.PermissionDenied -> InfoCard(
+            title = "Shizuku permission needed",
+            body = "Allow CleanForge in Shizuku to clean app caches and uninstalled-app leftovers.",
+            icon = icon,
+            action = { Button(onClick = onRequestPermission) { Text("Grant permission") } }
+        )
+        ShizukuState.PermissionPermanentlyDenied -> InfoCard(
+            title = "Shizuku permission was blocked",
+            body = "You chose \"don't ask again\", so Android will not show the dialog again. Open the Shizuku app, " +
+                "find CleanForge in its list of authorized apps and allow it, then come back.",
+            icon = icon,
+            action = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onOpenShizuku) { Text("Open Shizuku") }
+                    OutlinedButton(onClick = onRecheck) { Text("Check again") }
+                }
+            }
+        )
+        ShizukuState.Disconnected -> InfoCard(
+            title = "Shizuku disconnected",
+            body = "The Shizuku service stopped. Start it again, then return here.",
+            icon = icon,
+            action = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") }
+                    OutlinedButton(onClick = onRecheck) { Text("Check again") }
+                }
+            }
+        )
+        ShizukuState.ServerTooOld -> InfoCard(
+            title = "Shizuku is too old",
+            body = "CleanForge needs Shizuku version 11 or newer. Update the Shizuku app, restart it, then come back.",
+            icon = icon,
+            action = { OutlinedButton(onClick = onOpenShizuku) { Text("Open Shizuku") } }
+        )
+        is ShizukuState.Error -> InfoCard(
+            title = "Shizuku problem",
+            body = state.message,
+            icon = icon,
+            action = { OutlinedButton(onClick = onRecheck) { Text("Check again") } }
+        )
+    }
+}
+
+/** One row per privileged operation: what it needs, whether it works HERE, and its limits. Nothing is assumed. */
+@Composable
+fun CapabilityCard(report: CapabilityReport, onRecheck: () -> Unit) {
+    InfoCard(
+        title = "What Shizuku can do here",
+        body = report.operations.values.joinToString("\n\n") { c ->
+            val checked = c.checkedAtMs?.let { " (" + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it)) + ")" } ?: ""
+            "${c.operation.title}\n${capabilityLabel(c)}$checked: ${c.reason}"
+        } + (report.serviceUid?.let { "\n\nService runs as uid $it" + (if (it == 0) " (root)." else " (shell, not root).") } ?: ""),
+        icon = { Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary) },
+        action = { OutlinedButton(onClick = onRecheck) { Text("Check again") } }
+    )
+}
+
+private fun capabilityLabel(c: OperationCapability): String = when (c.status) {
+    CapabilityStatus.VERIFIED -> "Verified"
+    CapabilityStatus.PREREQUISITES_MET -> "Ready, not proven yet"
+    CapabilityStatus.NEEDS_AUTHORIZATION -> "Needs permission"
+    CapabilityStatus.UNAVAILABLE -> "Unavailable right now"
+    CapabilityStatus.UNSUPPORTED -> "Not supported on this device"
+    CapabilityStatus.UNKNOWN -> "Not checked"
+}
+
+@Composable
+fun ScanBar(
+    scanning: Boolean,
+    label: String,
+    buttonText: String,
+    hint: String,
+    onScan: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (scanning) {
+            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Stop scanning") }
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+        } else {
+            Button(onClick = onScan, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Search, null)
+                Spacer(Modifier.size(8.dp))
+                Text(buttonText)
+            }
+            Text(
+                hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun NoticeCard(notices: List<String>) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Skipped or incomplete", style = MaterialTheme.typography.titleSmall)
+            notices.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/WarmButton.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.cleanforge.ui.theme.LocalWarmPalette
+import com.cleanforge.ui.util.Haptic
+import com.cleanforge.ui.util.rememberHaptics
+
+enum class WarmBtnStyle { Primary, Clay, Soft, Outline, Ghost, Danger }
+
+@Composable
+fun WarmButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: WarmBtnStyle = WarmBtnStyle.Primary,
+    small: Boolean = false,
+    enabled: Boolean = true,
+    hapticType: Haptic = Haptic.Light,
+) {
+    val palette = LocalWarmPalette.current
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 900f),
+        label = "btnScale",
+    )
+
+    val (bg, fg, border) = when (style) {
+        WarmBtnStyle.Primary -> Triple(palette.fabBg, palette.fabText, Color.Transparent)
+        WarmBtnStyle.Clay -> Triple(palette.clay, if (palette.bg == Color(0xFF101014)) Color(0xFF1A0F0A) else Color(0xFFFFF6EF), Color.Transparent)
+        WarmBtnStyle.Soft -> Triple(palette.surface3, palette.ink, palette.line)
+        WarmBtnStyle.Outline -> Triple(Color.Transparent, palette.ink, palette.line)
+        WarmBtnStyle.Ghost -> Triple(Color.Transparent, palette.ink2, Color.Transparent)
+        WarmBtnStyle.Danger -> Triple(Color.Transparent, palette.brick, Color.Transparent)
+    }
+
+    val hPad = if (small) 16.dp else 20.dp
+    val vPad = if (small) 9.dp else 11.dp
+    val fontSize = if (small) androidx.compose.ui.unit.TextUnit.Unspecified else androidx.compose.ui.unit.TextUnit.Unspecified
+
+    Row(
+        modifier = modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(RoundedCornerShape(999.dp))
+            .background(bg)
+            .then(
+                if (border != Color.Transparent)
+                    Modifier.border(BorderStroke(1.dp, border), RoundedCornerShape(999.dp))
+                else Modifier
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+            ) {
+                haptics(hapticType)
+                onClick()
+            }
+            .padding(horizontal = hPad, vertical = vPad),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = if (small)
+                androidx.compose.material3.MaterialTheme.typography.bodySmall
+            else
+                androidx.compose.material3.MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            color = if (enabled) fg else fg.copy(alpha = 0.5f),
+        )
+    }
+}
+
+----- file: ./app/src/main/java/com/cleanforge/ui/components/Dialogs.kt -----
+package com.cleanforge.ui.components
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.cleanforge.core.model.CleaningPlan
+import com.cleanforge.core.model.CleaningReport
+import com.cleanforge.core.model.RejectedItem
+import com.cleanforge.core.model.ItemStatus
+import com.cleanforge.core.model.Reversibility
+import com.cleanforge.ui.CleaningUi
+import com.cleanforge.ui.ConfirmationEvidence
+import com.cleanforge.ui.confirmationEvidence
+import com.cleanforge.ui.formatBytes
+
+/**
+ * USER CONFIRMATION step. Every item that will be deleted is listed in full (no "and N more"): its complete path,
+ * why it was flagged, confidence, risk, what exactly happens, and for duplicates which copy stays.
+ * Refused items are listed with their full path and reason too.
+ */
+@Composable
+fun ConfirmDialog(plan: CleaningPlan, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.DeleteForever, contentDescription = null) },
+        title = {
+            Text(if (plan.isEmpty) "Nothing can be deleted" else "Delete ${plan.items.size} item(s)?")
+        },
+        text = {
+            LazyColumn(Modifier.fillMaxWidth()) {
+                if (!plan.isEmpty) {
+                    item(key = "summary") { PlanSummary(plan) }
+                    items(plan.items, key = { "delete:" + it.path }) { EvidenceBlock(it.confirmationEvidence()) }
+                }
+                if (plan.rejected.isNotEmpty()) {
+                    item(key = "refused-header") {

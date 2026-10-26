@@ -1,6 +1,8 @@
 package com.cleanforge.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,8 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cleanforge.core.model.CleaningPlan
 import com.cleanforge.core.model.CleaningReport
-import com.cleanforge.core.model.RejectedItem
 import com.cleanforge.core.model.ItemStatus
+import com.cleanforge.core.model.PermissionNeed
+import com.cleanforge.core.model.PermissionNote
+import com.cleanforge.core.model.RejectedItem
 import com.cleanforge.core.model.Reversibility
 import com.cleanforge.ui.CleaningUi
 import com.cleanforge.ui.ConfirmationEvidence
@@ -36,11 +40,17 @@ import com.cleanforge.ui.formatBytes
 
 /**
  * USER CONFIRMATION step. Every item that will be deleted is listed in full (no "and N more"): its complete path,
- * why it was flagged, confidence, risk, what exactly happens, and for duplicates which copy stays.
- * Refused items are listed with their full path and reason too.
+ * why it was flagged, confidence, risk, what exactly happens, whether a permission is currently missing, and for
+ * duplicates which copy stays. Refused items are listed with their full path and reason too.
  */
 @Composable
-fun ConfirmDialog(plan: CleaningPlan, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun ConfirmDialog(
+    plan: CleaningPlan,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    onOpenAllFilesSettings: () -> Unit = {},
+    onOpenShizuku: () -> Unit = {}
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.DeleteForever, contentDescription = null) },
@@ -51,7 +61,18 @@ fun ConfirmDialog(plan: CleaningPlan, onConfirm: () -> Unit, onDismiss: () -> Un
             LazyColumn(Modifier.fillMaxWidth()) {
                 if (!plan.isEmpty) {
                     item(key = "summary") { PlanSummary(plan) }
-                    items(plan.items, key = { "delete:" + it.path }) { EvidenceBlock(it.confirmationEvidence()) }
+                }
+                if (plan.hasBlockingPermissions) {
+                    item(key = "perm") {
+                        PermissionBanner(
+                            plan = plan,
+                            onOpenAllFilesSettings = onOpenAllFilesSettings,
+                            onOpenShizuku = onOpenShizuku
+                        )
+                    }
+                }
+                items(plan.items, key = { "delete:" + it.path }) {
+                    EvidenceBlock(it.confirmationEvidence(), plan.permissionNotes[it.path])
                 }
                 if (plan.rejected.isNotEmpty()) {
                     item(key = "refused-header") {
@@ -61,18 +82,21 @@ fun ConfirmDialog(plan: CleaningPlan, onConfirm: () -> Unit, onDismiss: () -> Un
                             fontWeight = FontWeight.SemiBold
                         )
                     }
-                    items(plan.rejected, key = { "refused:" + it.item.category.name + ":" + it.item.path + ":" + it.reason }) {
-                        RefusedBlock(it)
-                    }
+                    items(
+                        plan.rejected,
+                        key = { "refused:" + it.item.category.name + ":" + it.item.path + ":" + it.reason }
+                    ) { RefusedBlock(it) }
                 }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = onConfirm,
-                enabled = !plan.isEmpty,
+                enabled = !plan.isEmpty && !plan.allItemsBlocked,
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-            ) { Text("Delete permanently") }
+            ) {
+                Text(if (plan.allItemsBlocked) "Nothing can run right now" else "Delete permanently")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
@@ -82,7 +106,8 @@ fun ConfirmDialog(plan: CleaningPlan, onConfirm: () -> Unit, onDismiss: () -> Un
 private fun PlanSummary(plan: CleaningPlan) {
     Column {
         Text(
-            (if (plan.hasLowerBoundSizes) "Frees at least ${formatBytes(plan.totalBytes)}" else "Frees about ${formatBytes(plan.totalBytes)}") +
+            (if (plan.hasLowerBoundSizes) "Frees at least ${formatBytes(plan.totalBytes)}"
+            else "Frees about ${formatBytes(plan.totalBytes)}") +
                 " (file sizes, not disk blocks).",
             fontWeight = FontWeight.SemiBold
         )
@@ -107,7 +132,33 @@ private fun PlanSummary(plan: CleaningPlan) {
 }
 
 @Composable
-private fun EvidenceBlock(e: ConfirmationEvidence) {
+private fun PermissionBanner(
+    plan: CleaningPlan,
+    onOpenAllFilesSettings: () -> Unit,
+    onOpenShizuku: () -> Unit
+) {
+    val anyAllFiles = plan.permissionNotes.values.any { it.blocking && it.need == PermissionNeed.ALL_FILES }
+    val anyShizuku = plan.permissionNotes.values.any { it.blocking && it.need == PermissionNeed.SHIZUKU_OPERATION }
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text(
+            "Some items cannot run right now and will be skipped.",
+            color = MaterialTheme.colorScheme.error,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (anyAllFiles) {
+                TextButton(onClick = onOpenAllFilesSettings) { Text("Open All-files settings") }
+            }
+            if (anyShizuku) {
+                TextButton(onClick = onOpenShizuku) { Text("Open Shizuku") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EvidenceBlock(e: ConfirmationEvidence, permission: PermissionNote?) {
     val small = MaterialTheme.typography.bodySmall
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(e.path, style = small, fontWeight = FontWeight.SemiBold)
@@ -120,6 +171,14 @@ private fun EvidenceBlock(e: ConfirmationEvidence) {
         e.keepPath?.let { keep ->
             Text("KEEP: $keep", style = small, fontWeight = FontWeight.SemiBold)
             Text("DELETE CANDIDATE: ${e.path}", style = small, fontWeight = FontWeight.SemiBold)
+        }
+        if (permission != null) {
+            Text(
+                (if (permission.blocking) "BLOCKED: " else "") + permission.detail,
+                style = small,
+                color = if (permission.blocking) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Spacer(Modifier.height(6.dp))
         HorizontalDivider()
@@ -173,7 +232,10 @@ fun ReportDialog(report: CleaningReport, onDismiss: () -> Unit) {
         title = { Text(if (report.fullySuccessful) "All done" else "Finished with issues") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Freed ${formatBytes(report.bytesFreed)} (file sizes reported by the cleaner)", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Freed ${formatBytes(report.bytesFreed)} (file sizes reported by the cleaner)",
+                    fontWeight = FontWeight.SemiBold
+                )
                 if (report.unconfirmedBytes > 0) {
                     Text("${formatBytes(report.unconfirmedBytes)} of that could not be confirmed afterwards.")
                 }

@@ -5,7 +5,6 @@ import com.cleanforge.ui.components.WarmButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,7 +25,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cleanforge.ui.components.WarmCard
-import com.cleanforge.ui.components.WarmSwitch
 import com.cleanforge.ui.theme.Fraunces
 import com.cleanforge.ui.theme.LocalWarmPalette
 import com.cleanforge.ui.util.Haptic
@@ -37,11 +35,11 @@ fun AboutScreen(
     themeLabel: String,
     onCycleTheme: () -> Unit,
     onForgeTap: () -> Unit,
+    onDiagnostics: () -> Unit
 ) {
     val palette = LocalWarmPalette.current
     val haptics = rememberHaptics()
 
-    // About hero — 7-tap easter egg target
     WarmCard(
         bg = palette.aboutSurface,
         border = palette.line2,
@@ -57,10 +55,7 @@ fun AboutScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(palette.clay),
+                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(20.dp)).background(palette.clay),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("🧹", style = MaterialTheme.typography.headlineMedium)
@@ -88,7 +83,6 @@ fun AboutScreen(
 
     Spacer(Modifier.height(10.dp))
 
-    // Facts
     WarmCard(bg = palette.surface, border = palette.line2) {
         Fact("◉", "No internet, no tracking",
             "CleanForge does not declare the INTERNET permission. No ads, no analytics, no accounts. Your files never leave your phone.",
@@ -109,7 +103,6 @@ fun AboutScreen(
 
     Spacer(Modifier.height(10.dp))
 
-    // Dark mode — permanent setting
     WarmCard(bg = palette.surface, border = palette.line2) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -130,6 +123,30 @@ fun AboutScreen(
             WarmButton(text = themeLabel, onClick = onCycleTheme, style = WarmBtnStyle.Soft, small = true)
         }
     }
+
+    Spacer(Modifier.height(10.dp))
+
+    WarmCard(bg = palette.surface, border = palette.line2) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Diagnostics",
+                    fontFamily = Fraunces,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp),
+                    color = palette.ink,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Export a report of what the last scan checked and why. Nothing leaves your phone until you share it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.ink2,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            WarmButton(text = "Share", onClick = onDiagnostics, style = WarmBtnStyle.Soft, small = true)
+        }
+    }
 }
 
 enum class FactGlyph { Default, Sage, Amber, Brick }
@@ -145,22 +162,14 @@ private fun Fact(glyph: String, title: String, body: String, glyphStyle: FactGly
     }
     Row(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
         Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(11.dp))
-                .background(bg),
+            modifier = Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(bg),
             contentAlignment = Alignment.Center,
         ) {
             Text(glyph, color = fg, style = MaterialTheme.typography.bodyMedium)
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = palette.ink,
-            )
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = palette.ink)
             Spacer(Modifier.height(3.dp))
             Text(body, style = MaterialTheme.typography.bodySmall, color = palette.ink2)
         }

@@ -1,15 +1,14 @@
 package com.cleanforge.ui
 
-import com.cleanforge.data.ThemeMode
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.DonutLarge
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cleanforge.core.scanner.ScanMode
 import com.cleanforge.data.Preferences
+import com.cleanforge.data.ThemeMode
 import com.cleanforge.data.Verses
 import com.cleanforge.ui.components.ConfirmDialog
 import com.cleanforge.ui.components.CounterHeading
@@ -66,6 +67,7 @@ import com.cleanforge.ui.components.WarmToastHost
 import com.cleanforge.ui.components.openAllFilesSettings
 import com.cleanforge.ui.components.openShizukuApp
 import com.cleanforge.ui.screens.AboutScreen
+import com.cleanforge.ui.screens.AnalyzeScreen
 import com.cleanforge.ui.screens.CleanScreen
 import com.cleanforge.ui.screens.EasterEggSheet
 import com.cleanforge.ui.screens.MemoryScreen
@@ -78,19 +80,17 @@ import kotlinx.coroutines.launch
 enum class Screen(val key: String, val title: String, val subtitle: String) {
     Clean("clean", "CleanForge", "a quieter way to tidy up"),
     Review("review", "Review", "you decide what stays"),
+    Analyze("analyze", "Analyze", "where the space went"),
     Memory("ram", "Memory", "honest, no boost claims"),
     About("about", "About", "open, private, honest"),
 }
 
-/**
- * The Warm shell, driven by the real engine: [CleanViewModel] (scan, selection, plan, cleaning) and [RamViewModel].
- * Deletion always goes through the real confirmation dialog that lists every path.
- */
 @Composable
 fun CleanForgeApp(
     prefs: Preferences,
     vm: CleanViewModel = hiltViewModel(),
     ramVm: RamViewModel = hiltViewModel(),
+    analyzeVm: AnalyzeViewModel = hiltViewModel(),
 ) {
     val palette = LocalWarmPalette.current
     val scope = rememberCoroutineScope()
@@ -101,12 +101,12 @@ fun CleanForgeApp(
     val versesEnabled by prefs.verses.collectAsStateWithLifecycle(initialValue = true)
     val ui by vm.ui.collectAsStateWithLifecycle()
     val ram by ramVm.state.collectAsStateWithLifecycle()
+    val analyze by analyzeVm.ui.collectAsStateWithLifecycle()
 
     var currentScreen by remember { mutableStateOf(Screen.Clean) }
     var toast by remember { mutableStateOf<String?>(null) }
     var showEgg by remember { mutableStateOf(false) }
 
-    // 7-tap easter egg state
     var forgeTaps by remember { mutableStateOf(0) }
     var forgeLastTap by remember { mutableStateOf(0L) }
 
@@ -117,19 +117,15 @@ fun CleanForgeApp(
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-    // Permission and Shizuku state can change while the app is in the background.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
 
-    // Read /proc/meminfo only while the Memory tab is on screen and the app is in the foreground.
     LifecycleStartEffect(currentScreen) {
         if (currentScreen == Screen.Memory) ramVm.startObserving()
         onStopOrDispose { ramVm.stopObserving() }
     }
 
-    // Reset scroll on tab change
     LaunchedEffect(currentScreen) { scrollState.animateScrollTo(0, tween(300)) }
 
-    // A finished cleaning report arrives from the engine: give it the success tap.
     val reportReady = ui.cleaning?.report != null
     LaunchedEffect(reportReady) { if (reportReady) haptics(Haptic.Success) }
 
@@ -148,7 +144,6 @@ fun CleanForgeApp(
 
     Box(Modifier.fillMaxSize().background(palette.bg)) {
 
-        // Layer 1: Fixed verse behind everything
         if (versesEnabled) {
             VerseHero(
                 verse = Verses.ANCHOR,
@@ -160,7 +155,6 @@ fun CleanForgeApp(
             )
         }
 
-        // Layer 2: Scrollable content
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -178,69 +172,76 @@ fun CleanForgeApp(
                 },
                 label = "screen",
             ) { screen ->
-              Column(Modifier.fillMaxWidth()) {
-            when (screen) {
-                Screen.Clean -> CleanScreen(
-                    ui = ui,
-                    items = quickItems,
-                    onToggle = ::toggleItem,
-                    onScan = { haptics(Haptic.Medium); vm.scan(ScanMode.QUICK) },
-                    onCancelScan = vm::cancelScan,
-                    onOpenFilesSettings = { openAllFilesSettings(context) },
-                    onRequestShizukuPermission = vm::requestShizukuPermission,
-                    onOpenShizuku = { openShizukuApp(context) },
-                    onRecheckShizuku = { vm.forceRecheckShizuku(); toast = "Checking Shizuku…" },
-                    onToggleStorage = vm::toggleStorage,
-                    emptyStateVerse = if (versesEnabled) emptyStateVerse else null,
-                )
-                Screen.Review -> ReviewScreen(
-                    ui = ui,
-                    items = reviewItems,
-                    onToggle = ::toggleItem,
-                    onScan = { haptics(Haptic.Medium); vm.scan(ScanMode.ON_DEMAND) },
-                    onCancelScan = vm::cancelScan,
-                    onSelectEverything = { haptics(Haptic.Medium); vm.selectEverythingAndReview(reviewItems) },
-                )
-                Screen.Memory -> {
-                    val snap = ram.snapshot
-                    MemoryScreen(
-                        usedBytes = snap?.usedBytes ?: 0L,
-                        totalBytes = snap?.totalBytes ?: 0L,
-                        availableBytes = snap?.availableBytes ?: 0L,
-                        lastFreedLabel = ram.lastClearResult?.note,
-                        clearing = ram.isClearing,
-                        onClear = { haptics(Haptic.Medium); ramVm.clear() },
-                        processes = ram.processes,
-                        onToggleProcesses = { haptics(Haptic.Light); ramVm.toggleProcesses() },
-                    )
+                Column(Modifier.fillMaxWidth()) {
+                    when (screen) {
+                        Screen.Clean -> CleanScreen(
+                            ui = ui,
+                            items = quickItems,
+                            onToggle = ::toggleItem,
+                            onScan = { haptics(Haptic.Medium); vm.scan(ScanMode.QUICK) },
+                            onCancelScan = vm::cancelScan,
+                            onOpenFilesSettings = { openAllFilesSettings(context) },
+                            onRequestShizukuPermission = vm::requestShizukuPermission,
+                            onOpenShizuku = { openShizukuApp(context) },
+                            onRecheckShizuku = { vm.forceRecheckShizuku(); toast = "Checking Shizuku…" },
+                            onToggleStorage = vm::toggleStorage,
+                            emptyStateVerse = if (versesEnabled) emptyStateVerse else null,
+                        )
+                        Screen.Review -> ReviewScreen(
+                            ui = ui,
+                            items = reviewItems,
+                            onToggle = ::toggleItem,
+                            onScan = { haptics(Haptic.Medium); vm.scan(ScanMode.ON_DEMAND) },
+                            onCancelScan = vm::cancelScan,
+                            onSelectEverything = { haptics(Haptic.Medium); vm.selectEverythingAndReview(reviewItems) },
+                        )
+                        Screen.Analyze -> AnalyzeScreen(
+                            ui = analyze,
+                            onOpen = analyzeVm::open,
+                            onUp = analyzeVm::up,
+                            onRefresh = analyzeVm::refresh,
+                            onSelectRange = analyzeVm::selectRange,
+                        )
+                        Screen.Memory -> {
+                            val snap = ram.snapshot
+                            MemoryScreen(
+                                usedBytes = snap?.usedBytes ?: 0L,
+                                totalBytes = snap?.totalBytes ?: 0L,
+                                availableBytes = snap?.availableBytes ?: 0L,
+                                lastFreedLabel = ram.lastClearResult?.note,
+                                clearing = ram.isClearing,
+                                onClear = { haptics(Haptic.Medium); ramVm.clear() },
+                                processes = ram.processes,
+                                onToggleProcesses = { haptics(Haptic.Light); ramVm.toggleProcesses() },
+                            )
+                        }
+                        Screen.About -> AboutScreen(
+                            themeLabel = themeMode.name,
+                            onCycleTheme = {
+                                scope.launch {
+                                    val next = themeMode.next()
+                                    prefs.setThemeMode(next)
+                                    toast = "Theme: ${next.name}"
+                                }
+                            },
+                            onForgeTap = {
+                                val now = System.currentTimeMillis()
+                                if (now - forgeLastTap > 1400) forgeTaps = 0
+                                forgeTaps += 1
+                                forgeLastTap = now
+                                if (forgeTaps >= 7) {
+                                    forgeTaps = 0
+                                    haptics(Haptic.Medium)
+                                    showEgg = true
+                                }
+                            },
+                            onDiagnostics = { haptics(Haptic.Light); vm.showDiagnostics(context) },
+                        )
+                    }
                 }
-                Screen.About -> AboutScreen(
-                    themeLabel = themeMode.name,
-                    onCycleTheme = {
-                        scope.launch {
-                            val next = themeMode.next()
-                            prefs.setThemeMode(next)
-                            toast = "Theme: ${next.name}"
-                        }
-                    },
-                    onForgeTap = {
-                        val now = System.currentTimeMillis()
-                        if (now - forgeLastTap > 1400) forgeTaps = 0
-                        forgeTaps += 1
-                        forgeLastTap = now
-                        if (forgeTaps >= 7) {
-                            forgeTaps = 0
-                            haptics(Haptic.Medium)
-                            showEgg = true
-                        }
-                    },
-                )
-            }
-              }
             }
         }
 
-        // Layer 3: Frosted topbar
         FrostedTopbar(
             scrolled = scrolled,
             title = currentScreen.title,
@@ -248,7 +249,6 @@ fun CleanForgeApp(
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
-        // Layer 4: FAB (hidden while a plan, a run or a report is on screen)
         WarmFab(
             visible = ui.selected.isNotEmpty() && !ui.busy && ui.plan == null &&
                 (currentScreen == Screen.Clean || currentScreen == Screen.Review),
@@ -260,7 +260,6 @@ fun CleanForgeApp(
                 .padding(bottom = 88.dp + bottomInset),
         )
 
-        // Layer 5: Dock
         WarmDock(
             items = Screen.values().toList().map { s ->
                 DockItem(
@@ -268,12 +267,14 @@ fun CleanForgeApp(
                     label = when (s) {
                         Screen.Clean -> "Clean"
                         Screen.Review -> "Review"
+                        Screen.Analyze -> "Analyze"
                         Screen.Memory -> "Memory"
                         Screen.About -> "About"
                     },
                     icon = when (s) {
                         Screen.Clean -> Icons.Rounded.AutoAwesome
                         Screen.Review -> Icons.Rounded.CheckCircle
+                        Screen.Analyze -> Icons.Rounded.DonutLarge
                         Screen.Memory -> Icons.Rounded.Memory
                         Screen.About -> Icons.Rounded.Info
                     },
@@ -284,17 +285,22 @@ fun CleanForgeApp(
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
         )
 
-        // Layer 6: Toast
         WarmToastHost(message = toast, onDismiss = { toast = null })
     }
 
-    // The real confirmation, progress and report: every path listed, refused items explained.
     ui.plan?.let { plan ->
-        ConfirmDialog(plan = plan, onConfirm = vm::confirmClean, onDismiss = vm::dismissPlan)
+        ConfirmDialog(
+            plan = plan,
+            onConfirm = vm::confirmClean,
+            onDismiss = vm::dismissPlan,
+            onOpenAllFilesSettings = { openAllFilesSettings(context) },
+            onOpenShizuku = { openShizukuApp(context) },
+        )
     }
     ui.cleaning?.let { c ->
         val report = c.report
-        if (report == null) ProgressDialog(c, onStop = vm::cancelClean) else ReportDialog(report, onDismiss = vm::dismissReport)
+        if (report == null) ProgressDialog(c, onStop = vm::cancelClean)
+        else ReportDialog(report, onDismiss = vm::dismissReport)
     }
     if (showEgg) {
         EasterEggSheet(
@@ -328,7 +334,7 @@ private fun FrostedTopbar(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(palette.bg)
-                .statusBarsPadding() // edge-to-edge: keep the title clear of the clock and icons
+                .statusBarsPadding()
                 .padding(horizontal = 24.dp)
                 .padding(top = topPad, bottom = botPad),
         ) {
@@ -348,7 +354,6 @@ private fun FrostedTopbar(
                 )
             }
         }
-        // Gradient fade strip below topbar — cards fade into this
         Box(
             Modifier
                 .fillMaxWidth()

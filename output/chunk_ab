@@ -1,0 +1,4000 @@
+    padding: 24px 24px 6px;
+  }
+  .section-title {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--clay);
+  }
+  .section-meta {
+    font-size: 12px; color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Item rows */
+  .item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px 20px;
+    cursor: pointer;
+    transition: background-color 0.2s var(--ease-soft);
+    position: relative;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .item:last-child { border-bottom: none; }
+  .item:hover { background: var(--surface-2); }
+  .item:active { background: var(--surface-3); }
+  .item.selected { background: var(--clay-tint); }
+
+  .check {
+    width: 22px; height: 22px;
+    border-radius: 7px;
+    border: 1.5px solid var(--line);
+    background: var(--surface);
+    flex-shrink: 0; margin-top: 1px;
+    display: grid; place-items: center;
+    transition: all 0.25s var(--ease-spring);
+  }
+  .check svg {
+    width: 13px; height: 13px;
+    stroke: #FFFFFF; stroke-width: 3;
+    fill: none; stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 24; stroke-dashoffset: 24;
+    transition: stroke-dashoffset 0.3s var(--ease-out) 0.05s, stroke var(--theme-dur);
+  }
+  html.dark .check svg { stroke: #1A0F0A; }
+  .item.selected .check { background: var(--clay); border-color: var(--clay); transform: scale(1.05); }
+  .item.selected .check svg { stroke-dashoffset: 0; }
+
+  .item-body { flex: 1; min-width: 0; }
+  .item-name {
+    font-size: 14.5px; font-weight: 500;
+    color: var(--ink); letter-spacing: -0.005em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .item-reason {
+    font-size: 12.5px; color: var(--ink-2);
+    margin-top: 3px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .item-path {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10.5px; color: var(--ink-3);
+    margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .item-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .tag {
+    font-size: 10px; font-weight: 500;
+    padding: 3px 8px; border-radius: var(--r-pill);
+    letter-spacing: 0.02em; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .tag-safe   { background: var(--sage-soft);  color: #4F5F42; border-color: rgba(124,138,108,0.15); }
+  .tag-check  { background: var(--amber-soft); color: #8A6418; border-color: rgba(217,164,65,0.2); }
+  .tag-danger { background: var(--brick-soft); color: #8A2E1F; border-color: rgba(184,69,47,0.15); }
+  .tag-neutral{ background: var(--surface-3);  color: var(--ink-2); border-color: var(--line); }
+  html.dark .tag-safe    { background: rgba(169,184,158,0.14); color: #C6D3BB; border-color: rgba(169,184,158,0.2); }
+  html.dark .tag-check   { background: rgba(229,182,92,0.14); color: #E5B65C; border-color: rgba(229,182,92,0.2); }
+  html.dark .tag-danger  { background: rgba(240,139,122,0.14); color: #F0A092; border-color: rgba(240,139,122,0.2); }
+
+  .item-size {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 15px; font-weight: 500;
+    color: var(--ink); flex-shrink: 0; margin-top: 1px;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 40px 32px 12px;
+    color: var(--ink-3);
+    font-size: 13.5px; line-height: 1.7;
+    max-width: 320px; margin: 0 auto;
+  }
+  .empty-glyph { font-size: 28px; opacity: 0.35; margin-bottom: 12px; display: block; }
+
+  /* RAM screen */
+  .ram-wrap {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 20px 8px; gap: 22px;
+  }
+  .ram-gauge { position: relative; width: 180px; height: 180px; }
+  .ram-gauge svg { width: 180px; height: 180px; transform: rotate(-90deg); display: block; }
+  .ram-gauge circle { transition: stroke-dashoffset 1.4s var(--ease-out), stroke 0.6s; }
+  .ram-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .ram-pct {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 44px; font-weight: 400;
+    letter-spacing: -0.03em; line-height: 1;
+    color: var(--ink);
+  }
+  .ram-pressure {
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-3); margin-top: 8px;
+  }
+  .ram-stats { text-align: center; }
+  .ram-used { font-size: 15px; font-weight: 500; color: var(--ink); }
+  .ram-avail { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .ram-result {
+    font-size: 12.5px; color: var(--ink-2);
+    text-align: center; min-height: 18px;
+  }
+  .ram-note {
+    margin: 8px 20px 0; padding: 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-lg);
+    font-size: 13px; line-height: 1.6; color: var(--ink-2);
+    transition: background-color var(--theme-dur), border-color var(--theme-dur);
+  }
+  .ram-note strong { color: var(--ink); font-weight: 600; }
+  .ram-note code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11.5px;
+    background: var(--surface-3);
+    padding: 1px 6px; border-radius: 5px;
+    color: var(--clay);
+  }
+
+  /* About */
+  .about-hero {
+    margin: 10px 20px;
+    padding: 26px 22px;
+    border-radius: var(--r-xl);
+    background: var(--clay-tint);
+    border: 1px solid var(--line-2);
+    display: flex; gap: 18px; align-items: center;
+    box-shadow: 0 1px 2px rgba(60,44,32,0.025);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: transform 0.2s var(--ease-spring),
+                background-color var(--theme-dur),
+                border-color var(--theme-dur);
+  }
+  .about-hero:active { transform: scale(0.985); }
+  html.dark .about-hero {
+    background: #2B1811;
+    border-color: rgba(255,158,124,0.06);
+  }
+  .about-glyph {
+    width: 64px; height: 64px;
+    border-radius: 20px;
+    background: var(--clay);
+    display: grid; place-items: center;
+    font-size: 28px; flex-shrink: 0;
+    box-shadow: 0 6px 18px rgba(193,92,46,0.22);
+  }
+  html.dark .about-glyph { color: #1A0F0A; box-shadow: 0 6px 18px rgba(255,158,124,0.18); }
+  .about-name {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 24px; font-weight: 500;
+    letter-spacing: -0.02em; line-height: 1.1;
+  }
+  .about-by { font-size: 13.5px; color: var(--ink-2); margin-top: 4px; }
+  .about-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; }
+
+  .fact {
+    display: flex; gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line-2);
+  }
+  .fact:last-child { border-bottom: none; padding-bottom: 4px; }
+  .fact:first-child { padding-top: 4px; }
+  .fact-glyph {
+    width: 34px; height: 34px;
+    border-radius: 11px;
+    display: grid; place-items: center;
+    background: var(--clay-tint); color: var(--clay);
+    flex-shrink: 0; font-size: 16px;
+  }
+  .fact-glyph.sage { background: var(--sage-soft); color: var(--sage); }
+  .fact-glyph.amber { background: var(--amber-soft); color: #A77A1E; }
+  .fact-glyph.brick { background: var(--brick-soft); color: var(--brick); }
+  html.dark .fact-glyph.amber { color: var(--amber); }
+  .fact-title {
+    font-size: 14px; font-weight: 600;
+    color: var(--ink); margin-bottom: 3px;
+  }
+  .fact-body { font-size: 13px; color: var(--ink-2); line-height: 1.55; }
+
+  /* Settings rows */
+  .settings-row { display: flex; align-items: center; gap: 16px; padding: 4px 0; }
+  .settings-text { flex: 1; min-width: 0; }
+  .settings-title {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 16px; font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--ink); margin-bottom: 4px;
+  }
+  .settings-desc { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+
+  /* iOS-style switch */
+  .switch {
+    position: relative;
+    width: 46px; height: 28px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    border: 1px solid var(--line);
+    flex-shrink: 0; cursor: pointer;
+    transition: background-color 0.3s var(--ease-soft), border-color 0.3s;
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(60,44,32,0.18);
+    transition: transform 0.3s var(--ease-spring), background-color 0.3s;
+  }
+  html.dark .switch::after { background: #F3F0EB; }
+  .switch.on { background: var(--clay); border-color: var(--clay); }
+  .switch.on::after { transform: translateX(18px); }
+  html.dark .switch.on::after { background: #1A0F0A; }
+
+  /* Dock */
+  .dock {
+    position: fixed;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    max-width: 408px;
+    padding: 6px;
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid rgba(255,255,255,0.72);
+    border-radius: var(--r-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 28px rgba(60,44,32,0.10);
+    display: flex;
+    z-index: 30;
+    transition: background-color var(--theme-dur) var(--ease-soft),
+                border-color var(--theme-dur) var(--ease-soft),
+                box-shadow var(--theme-dur) var(--ease-soft);
+  }
+  html.dark .dock {
+    background: rgba(24, 32, 27, 0.78);
+    border-color: rgba(255,255,255,0.045);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 28px rgba(0,0,0,0.55);
+  }
+  .dock-pill {
+    position: absolute;
+    top: 6px; bottom: 6px; left: 0;
+    background: var(--clay-soft);
+    border-radius: var(--r-pill);
+    transition: transform 0.45s var(--ease-spring), width 0.45s var(--ease-spring), background-color var(--theme-dur);
+    z-index: 0; pointer-events: none;
+  }
+  .dock-item {
+    position: relative; z-index: 1;
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 2px;
+    padding: 8px 4px 6px;
+    border-radius: var(--r-pill);
+    color: var(--ink-3);
+    transition: color 0.3s var(--ease-soft), transform 0.2s var(--ease-spring);
+  }
+  .dock-item:active { transform: scale(0.94); }
+  .dock-item.active { color: var(--clay-2); }
+  html.dark .dock-item.active { color: var(--clay); }
+  .dock-icon { width: 20px; height: 20px; display: block; transition: transform 0.35s var(--ease-spring); }
+  .dock-item.active .dock-icon { transform: scale(1.08) translateY(-1px); }
+  .dock-label { font-size: 10px; font-weight: 500; letter-spacing: 0.02em; }
+
+  /* FAB */
+  .fab {
+    position: fixed;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 72px);
+    left: 50%;
+    transform: translateX(-50%) translateY(0);
+    background: var(--ink); color: #F6F0E8;
+    border-radius: var(--r-pill);
+    padding: 13px 22px;
+    font-size: 13.5px; font-weight: 500;
+    display: flex; align-items: center; gap: 9px;
+    box-shadow: 0 6px 20px rgba(42,35,30,0.24);
+    z-index: 25;
+    transition: transform 0.4s var(--ease-spring), opacity 0.3s var(--ease-soft),
+                background-color var(--theme-dur), color var(--theme-dur), box-shadow var(--theme-dur);
+    white-space: nowrap;
+  }
+  .fab:active { transform: translateX(-50%) scale(0.95); }
+  .fab.hidden {
+    opacity: 0; pointer-events: none;
+    transform: translateX(-50%) translateY(16px) scale(0.9);
+  }
+  html.dark .fab {
+    background: var(--clay); color: #1A0F0A;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  }
+  .fab-count {
+    display: inline-grid; place-items: center;
+    min-width: 22px; height: 22px;
+    padding: 0 7px; border-radius: 999px;
+    background: var(--clay); color: #FFF;
+    font-size: 11.5px; font-weight: 600;
+  }
+  html.dark .fab-count { background: rgba(26,15,10,0.75); color: var(--clay-2); }
+  .fab-size { opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+  /* Dialogs */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(42,35,30,0.32);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex; align-items: flex-end; justify-content: center;
+    z-index: 100;
+    animation: overlayIn 0.3s var(--ease-out);
+  }
+  html.dark .overlay { background: rgba(0,0,0,0.7); }
+  @media (min-width: 520px) { .overlay { align-items: center; padding: 24px; } }
+  @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+  .overlay.hidden { display: none; }
+
+  .sheet {
+    background: var(--surface);
+    width: 100%; max-width: 460px;
+    border-radius: 28px 28px 0 0;
+    padding: 28px 24px max(28px, env(safe-area-inset-bottom));
+    max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 -12px 48px rgba(42,35,30,0.16);
+    animation: sheetIn 0.4s var(--ease-out);
+    scrollbar-width: none;
+    transition: background-color var(--theme-dur), box-shadow var(--theme-dur);
+  }
+  html.dark .sheet {
+    box-shadow: 0 -12px 48px rgba(0,0,0,0.7);
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+  .sheet::-webkit-scrollbar { display: none; }
+  @media (min-width: 520px) {
+    .sheet { border-radius: 28px; padding: 28px 26px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); max-height: 84vh; }
+  }
+  @keyframes sheetIn {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .sheet-grip {
+    width: 36px; height: 4px; border-radius: 2px;
+    background: var(--line);
+    margin: -12px auto 20px;
+  }
+  @media (min-width: 520px) { .sheet-grip { display: none; } }
+
+  .sheet h2 {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 24px; font-weight: 500;
+    letter-spacing: -0.02em; line-height: 1.2;
+    margin-bottom: 8px;
+  }
+  .sheet-sub {
+    font-size: 13.5px; color: var(--ink-2);
+    line-height: 1.55; margin-bottom: 20px;
+  }
+  .sheet-body {
+    font-size: 13.5px; color: var(--ink-2);
+    line-height: 1.6; margin-bottom: 20px;
+  }
+  .sheet-actions {
+    display: flex; gap: 10px; justify-content: flex-end;
+    margin-top: 20px; flex-wrap: wrap;
+  }
+  .sheet-actions .btn { flex: none; }
+  .sheet-actions .btn-primary, .sheet-actions .btn-clay { flex: 1; }
+
+  .evidence {
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+    overflow: hidden; margin-bottom: 8px;
+  }
+  .evidence-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line-2);
+    font-size: 12px;
+  }
+  .evidence-item:last-child { border-bottom: none; }
+  .evidence-path {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: var(--ink);
+    word-break: break-all; line-height: 1.45; font-weight: 500;
+  }
+  .evidence-meta {
+    font-size: 11.5px; color: var(--ink-2);
+    margin-top: 4px; line-height: 1.5;
+  }
+  .evidence-meta strong { color: var(--ink); font-weight: 500; }
+
+  .warn-banner {
+    display: flex; gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--r-md);
+    background: var(--brick-soft);
+    color: #7A2818;
+    font-size: 12.5px; line-height: 1.5;
+    margin-bottom: 14px;
+    border: 1px solid rgba(184,69,47,0.15);
+  }
+  html.dark .warn-banner { color: #F0A092; }
+  .warn-banner::before { content: '⚠'; font-size: 14px; flex-shrink: 0; line-height: 1.3; }
+
+  .progress-track {
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 3px;
+    overflow: hidden; margin-bottom: 14px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--clay), #E08A5C);
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.5s var(--ease-out);
+  }
+  html.dark .progress-fill {
+    background: linear-gradient(90deg, var(--clay), var(--clay-2));
+  }
+  .progress-label {
+    font-size: 13.5px; color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .report-big {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 40px; font-weight: 400;
+    letter-spacing: -0.03em;
+    color: var(--clay); line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 76px);
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--ink); color: #F6F0E8;
+    padding: 12px 20px;
+    border-radius: var(--r-pill);
+    font-size: 13px; font-weight: 500;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s var(--ease-soft), transform 0.35s var(--ease-spring),
+                background-color var(--theme-dur), color var(--theme-dur);
+    z-index: 200;
+    box-shadow: 0 8px 24px rgba(42,35,30,0.24);
+    max-width: calc(100% - 40px);
+    text-align: center;
+  }
+  html.dark .toast {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <main class="content" id="content">
+    <div class="content-inner">
+      <!-- ═══ Clean ═══ -->
+      <section class="screen active" id="screen-clean">
+        <div class="hero reveal" style="--i:0">
+          <div class="ring">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="43" fill="none" stroke="var(--surface-3)" stroke-width="7"/>
+              <circle cx="50" cy="50" r="43" fill="none" stroke="var(--clay)" stroke-width="7"
+                stroke-linecap="round" id="heroRing"
+                stroke-dasharray="270.18" stroke-dashoffset="270.18"/>
+            </svg>
+            <div class="pct" id="heroPct">0%</div>
+          </div>
+          <div class="hero-info">
+            <div class="hero-eyebrow">Available</div>
+            <div class="hero-number" id="heroFree">12.4 GB</div>
+            <div class="hero-label" id="heroTotal">free of 64 GB</div>
+          </div>
+        </div>
+
+        <div class="info-card reveal" style="--i:1">
+          <div class="info-head">
+            <div class="info-glyph">◐</div>
+            <div class="info-title">Allow access to files</div>
+          </div>
+          <p class="info-body">CleanForge needs All-files access to list and delete things in shared storage. It only deletes items you select and confirm — and the app has no internet permission.</p>
+          <div class="info-actions">
+            <button class="btn btn-soft btn-sm" onclick="openAllFilesSettings()">Open settings</button>
+          </div>
+        </div>
+
+        <div class="info-card reveal" style="--i:2">
+          <div class="info-head">
+            <div class="info-glyph sage">✦</div>
+            <div class="info-title">Shizuku is optional</div>
+          </div>
+          <p class="info-body">Without it, Android 11+ hides other apps' cache folders (Android/data), so those cleaners stay off. Everything else works. Install and start Shizuku, then come back.</p>
+          <div class="info-actions">
+            <button class="btn btn-outline btn-sm" onclick="checkShizuku()">Check again</button>
+          </div>
+        </div>
+
+        <div class="scan-block reveal" style="--i:3">
+          <p class="scan-hint">Looks at app caches, thumbnails, abandoned downloads, installers and leftovers of uninstalled apps. Nothing is deleted until you review and confirm.</p>
+          <div class="scan-actions">
+            <button class="btn btn-primary" id="scanBtn" onclick="startScan('quick')">
+              <span id="scanBtnLabel">Run scan</span>
+              <span class="dots" id="scanDots" style="display:none"><span>·</span><span>·</span><span>·</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div id="cleanNotices"></div>
+        <div id="cleanResults"></div>
+      </section>
+
+      <!-- ═══ Review ═══ -->
+      <section class="screen" id="screen-review">
+        <div class="info-card reveal" style="--i:0">
+          <div class="info-head">
+            <div class="info-glyph">◐</div>
+            <div class="info-title">Nothing is pre-selected</div>
+          </div>
+          <p class="info-body last">These tools only suggest things for <em>you</em> to look at. Large, old or duplicated files are often exactly what you want to keep — so none of them are ticked for you.</p>
+        </div>
+
+        <div class="scan-block reveal" style="--i:1">
+          <p class="scan-hint">Duplicate detection reads file contents on this phone — nothing is uploaded — and can take a few minutes on a lot of photos or videos.</p>
+          <div class="scan-actions">
+            <button class="btn btn-clay" id="reviewScanBtn" onclick="startScan('ondemand')">
+              <span id="reviewBtnLabel">Find large files &amp; duplicates</span>
+              <span class="dots" id="reviewDots" style="display:none"><span>·</span><span>·</span><span>·</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div id="reviewNotices"></div>
+        <div id="reviewResults"></div>
+      </section>
+
+      <!-- ═══ Memory ═══ -->
+      <section class="screen" id="screen-ram">
+        <div class="ram-wrap">
+          <div class="ram-gauge">
+            <svg viewBox="0 0 180 180">
+              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--surface-3)" stroke-width="10"/>
+              <circle cx="90" cy="90" r="78" fill="none" stroke="var(--clay)" stroke-width="10"
+                stroke-linecap="round" id="ramRing"
+                stroke-dasharray="490.09" stroke-dashoffset="490.09"/>
+            </svg>
+            <div class="ram-center">
+              <div class="ram-pct" id="ramPct">0%</div>
+              <div class="ram-pressure" id="ramPressure">—</div>
+            </div>
+          </div>
+
+          <div class="ram-stats">
+            <div class="ram-used" id="ramUsed">— used</div>
+            <div class="ram-avail" id="ramAvail">— available</div>
+          </div>
+
+          <button class="btn btn-primary" id="clearRamBtn" onclick="clearRam()">Clear background apps</button>
+          <div class="ram-result" id="ramResult"></div>
+        </div>
+
+        <div class="ram-note">
+          <strong>Honest memory info.</strong> CleanForge reads <code>/proc/meminfo</code> directly — no fake "boost" claims. Clearing background apps may free some RAM, but Android will reload them when needed, which uses more battery. The number above is the actual freed bytes, never an estimate.
+        </div>
+      </section>
+
+      <!-- ═══ About ═══ -->
+      <section class="screen" id="screen-about">
+        <div class="about-hero reveal" style="--i:0" id="forgeCard">
+          <div class="about-glyph">🧹</div>
+          <div>
+            <div class="about-name">CleanForge</div>
+            <div class="about-by">Made by Aman</div>
+            <div class="about-meta">v1.0.0 · © 2026 · free &amp; open source</div>
+          </div>
+        </div>
+
+        <div class="card reveal" style="--i:1">
+          <div class="fact">
+            <div class="fact-glyph sage">◉</div>
+            <div>
+              <div class="fact-title">No internet, no tracking</div>
+              <div class="fact-body">CleanForge does not declare the INTERNET permission. No ads, no analytics, no accounts. Your files never leave your phone.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph">✓</div>
+            <div>
+              <div class="fact-title">Evidence-based cleaning</div>
+              <div class="fact-body">Every item flagged carries proof of why it's safe to delete. Filename or extension alone is never accepted as evidence. You review and confirm everything.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph brick">⛨</div>
+            <div>
+              <div class="fact-title">Safety first</div>
+              <div class="fact-body">Fingerprint verification, symlink protection, mount boundaries, and depth limits. No shell commands, no recursive deletion. Personal data zones are never pre-selected.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph amber">✦</div>
+            <div>
+              <div class="fact-title">Shizuku integration (optional)</div>
+              <div class="fact-body">On Android 11+, Android/data and Android/obb are invisible to normal apps. Shizuku (user-service, not root) lets CleanForge read and clear those caches. Without it, those scanners are skipped with a visible notice.</div>
+            </div>
+          </div>
+          <div class="fact">
+            <div class="fact-glyph">◐</div>
+            <div>
+              <div class="fact-title">Honest RAM monitoring</div>
+              <div class="fact-body">Reads /proc/meminfo directly. Shows total, used, available, and cached memory with a colour-coded pressure indicator. No fake "boost" claims.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card reveal" style="--i:2">
+          <div class="settings-row">
+            <div class="settings-text">
+              <div class="settings-title">Dark mode</div>
+              <div class="settings-desc">Muted emerald on a calm neutral night.</div>
+            </div>
+            <div class="switch" id="darkSwitch" role="switch" aria-checked="false" onclick="toggleDark()"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Welcome verse — fixed behind content -->
+  <div class="welcome-host" id="welcomeVerseHost"></div>
+
+  <!-- Topbar — absolute overlay; cards scroll under it -->
+  <header class="topbar" id="topbar">
+    <h1 class="topbar-title" id="topTitle"></h1>
+    <p class="topbar-sub" id="topSub">a quieter way to tidy up</p>
+  </header>
+
+  <!-- FAB -->
+  <button class="fab hidden" id="fab" onclick="requestClean()">
+    <span>Review</span>
+    <span class="fab-count" id="fabCount">0</span>
+    <span class="fab-size" id="fabSize">0 B</span>
+  </button>
+
+  <!-- Dock -->
+  <nav class="dock" id="dock">
+    <div class="dock-pill" id="dockPill"></div>
+    <button class="dock-item active" data-screen="clean" onclick="navigate('clean')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3l1.5 4.5L15 9l-4.5 1.5L9 15l-1.5-4.5L3 9l4.5-1.5z"/>
+        <path d="M17 14l.8 2.2L20 17l-2.2.8L17 20l-.8-2.2L14 17l2.2-.8z"/>
+      </svg>
+      <span class="dock-label">Clean</span>
+    </button>
+    <button class="dock-item" data-screen="review" onclick="navigate('review')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12l5 5L20 6"/>
+      </svg>
+      <span class="dock-label">Review</span>
+    </button>
+    <button class="dock-item" data-screen="ram" onclick="navigate('ram')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="6" width="12" height="12" rx="2"/>
+        <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
+      </svg>
+      <span class="dock-label">Memory</span>
+    </button>
+    <button class="dock-item" data-screen="about" onclick="navigate('about')">
+      <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M12 11v5M12 8h.01"/>
+      </svg>
+      <span class="dock-label">About</span>
+    </button>
+  </nav>
+
+  <!-- Dialogs -->
+  <div class="overlay hidden" id="confirmDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2 id="confirmTitle">Delete 0 items?</h2>
+      <p class="sheet-sub" id="confirmSub"></p>
+      <div id="confirmWarn"></div>
+      <div class="evidence" id="confirmEvidence"></div>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost" onclick="closeDialog('confirmDialog')">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmDelete()">Delete permanently</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="progressDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2 id="progressTitle">Cleaning…</h2>
+      <p class="sheet-sub">Please keep the app open.</p>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-label" id="progressLabel">0 of 0 · freed 0 B</div>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost" onclick="stopCleaning()">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="reportDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2 id="reportTitle">All done</h2>
+      <div id="reportBody"></div>
+      <div class="sheet-actions">
+        <button class="btn btn-primary" onclick="closeDialog('reportDialog')">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="easterEggDialog">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <h2>Are you sure?</h2>
+      <p class="sheet-sub">Seven taps on the forge. That's either curiosity or destiny — and I'm not here to judge. Ready to flip the verses?</p>
+      <div class="sheet-actions">
+        <button class="btn btn-ghost" onclick="closeDialog('easterEggDialog')">Not yet</button>
+        <button class="btn btn-primary" onclick="confirmEasterEgg()">Flip it</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const ANCHOR_VERSE = {
+  text: 'For God so loved the world, that he gave his one and only Son, that whoever believes in him should not perish, but have eternal life.',
+  ref: 'John 3:16',
+};
+
+const PREF_KEY = 'cleanforge.prefs';
+const prefs = Object.assign(
+  { verses: true, dark: false },
+  JSON.parse(localStorage.getItem(PREF_KEY) || '{}')
+);
+function savePrefs() { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); }
+
+function applyTheme(animate) {
+  if (animate) {
+    document.documentElement.classList.add('theme-switching');
+    setTimeout(() => document.documentElement.classList.remove('theme-switching'), 400);
+  }
+  document.documentElement.classList.toggle('dark', !!prefs.dark);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', prefs.dark ? '#101014' : '#F4EFE8');
+}
+
+function toggleDark() {
+  prefs.dark = !prefs.dark;
+  savePrefs();
+  applyTheme(true);
+  syncToggleUI();
+  haptic(prefs.dark ? 'success' : 'light');
+  toast(prefs.dark ? 'Dark mode on' : 'Light mode on');
+}
+
+function haptic(pattern) {
+  if (!('vibrate' in navigator)) return;
+  const P = {
+    light: 8, medium: 14, heavy: 24, tick: 5,
+    success: [10, 40, 18], warn: [16, 55, 16], error: [26, 45, 26, 45, 26],
+  };
+  try { navigator.vibrate(P[pattern] || P.light); } catch (_) {}
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+const state = {
+  currentScreen: 'clean',
+  scanning: false,
+  scanned: false,
+  items: [],
+  selected: new Set(),
+  notices: [],
+  freeBytes: 12_400_000_000,
+  totalBytes: 64_000_000_000,
+  ramUsed: 3_200_000_000,
+  ramTotal: 6_000_000_000,
+  ramAvailable: 2_800_000_000,
+};
+
+const QUICK_ITEMS = [
+  { category: 'App caches', displayName: 'WhatsApp cache', path: '/storage/emulated/0/Android/data/com.whatsapp/cache', reason: 'Package installed + exact path match', sizeBytes: 245_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'REVERSIBLE', requiresShizuku: true },
+  { category: 'App caches', displayName: 'Instagram cache', path: '/storage/emulated/0/Android/data/com.instagram.android/cache', reason: 'Package installed + exact path match', sizeBytes: 180_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'REVERSIBLE', requiresShizuku: true },
+  { category: 'Leftovers', displayName: 'com.oldgame.app', path: '/storage/emulated/0/Android/data/com.oldgame.app', reason: 'Package unknown to OS + age ≥ 14 days', sizeBytes: 520_000_000, risk: 'SAFE', confidence: 'MEDIUM', reversibility: 'NOT_REVERSIBLE', requiresShizuku: true },
+  { category: 'Thumbnails', displayName: '.thumbnails', path: '/storage/emulated/0/DCIM/.thumbnails', reason: 'Only small files, no sub-folders', sizeBytes: 45_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'REVERSIBLE', requiresShizuku: false },
+  { category: 'Incomplete downloads', displayName: 'video.mp4.crdownload', path: '/storage/emulated/0/Download/video.mp4.crdownload', reason: 'Age ≥ 7 days + Download folder only', sizeBytes: 1_200_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Log files', displayName: 'app.log', path: '/storage/emulated/0/Download/app.log', reason: 'Text content verified + age ≥ 30 days', sizeBytes: 12_000_000, risk: 'SAFE', confidence: 'MEDIUM', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'APK installers', displayName: 'old_app.apk', path: '/storage/emulated/0/Download/old_app.apk', reason: 'Platform parser reads manifest', sizeBytes: 85_000_000, risk: 'SAFE', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Empty folders', displayName: 'empty_folder', path: '/storage/emulated/0/Download/empty_folder', reason: 'Verifiably empty directory', sizeBytes: 0, risk: 'SAFE', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+];
+
+const ONDEMAND_ITEMS = [
+  { category: 'Large files', displayName: 'movie.mp4', path: '/storage/emulated/0/Movies/movie.mp4', reason: 'File over threshold (2.1 GB)', sizeBytes: 2_100_000_000, risk: 'ELEVATED', confidence: 'LOW', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Duplicates', displayName: 'IMG_20240101_copy.jpg', path: '/storage/emulated/0/DCIM/Camera/IMG_20240101_copy.jpg', reason: 'Same content as IMG_20240101.jpg', sizeBytes: 4_500_000, risk: 'ELEVATED', confidence: 'HIGH', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+  { category: 'Large files', displayName: 'backup.zip', path: '/storage/emulated/0/Download/backup.zip', reason: 'File over threshold (1.8 GB)', sizeBytes: 1_800_000_000, risk: 'ELEVATED', confidence: 'LOW', reversibility: 'NOT_REVERSIBLE', requiresShizuku: false },
+];
+
+function fmt(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024, sizes = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+function esc(s) { return String(s).replace(/'/g, "\\'"); }
+
+/* ─────────────────────────────────────────────
+   Per-letter counter heading animation
+   ───────────────────────────────────────────── */
+function renderTitle(text) {
+  const el = document.getElementById('topTitle');
+  if (!el) return;
+  el.innerHTML = '';
+  [...text].forEach((ch, i) => {
+    const s = document.createElement('span');
+    s.className = 'title-letter';
+    s.textContent = ch === ' ' ? '\u00A0' : ch;
+    s.style.animationDelay = (i * 26) + 'ms';
+    el.appendChild(s);
+  });
+}
+
+const TITLES = {
+  clean:  { title: 'CleanForge', sub: 'a quieter way to tidy up' },
+  review: { title: 'Review',     sub: 'you decide what stays' },
+  ram:    { title: 'Memory',     sub: 'honest, no boost claims' },
+  about:  { title: 'About',      sub: 'open, private, honest' },
+};
+
+function navigate(screen) {
+  if (screen === state.currentScreen) return;
+  state.currentScreen = screen;
+  haptic('light');
+
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + screen);
+  void el.offsetWidth;
+  el.classList.add('active');
+
+  document.querySelectorAll('.dock-item').forEach(n =>
+    n.classList.toggle('active', n.dataset.screen === screen)
+  );
+
+  renderTitle(TITLES[screen].title);
+  document.getElementById('topSub').textContent = TITLES[screen].sub;
+
+  const content = document.getElementById('content');
+  content.scrollTop = 0;
+  document.getElementById('topbar').classList.remove('scrolled');
+  updateVerseScrollFade();
+
+  updateDockPill();
+  updateFab();
+}
+
+function updateDockPill() {
+  const active = document.querySelector('.dock-item.active');
+  const pill = document.getElementById('dockPill');
+  const dock = document.getElementById('dock');
+  if (!active || !pill || !dock) return;
+  const dRect = dock.getBoundingClientRect();
+  const aRect = active.getBoundingClientRect();
+  pill.style.width = aRect.width + 'px';
+  pill.style.transform = 'translateX(' + (aRect.left - dRect.left) + 'px)';
+}
+
+/* ─────────────────────────────────────────────
+   Verse
+   ───────────────────────────────────────────── */
+function verseHTML(verse) {
+  return '<div class="verse-welcome">' +
+    '<div class="verse-text">' + verse.text + '</div>' +
+    '<div class="verse-ref">' + verse.ref + '</div>' +
+  '</div>';
+}
+function playVerses(container) {
+  requestAnimationFrame(() => {
+    container.querySelectorAll('.verse-welcome').forEach(v => v.classList.add('show'));
+  });
+}
+function renderWelcomeVerse() {
+  const host = document.getElementById('welcomeVerseHost');
+  if (!host) return;
+  if (!prefs.verses) {
+    host.innerHTML = '';
+    document.body.classList.remove('verses-on');
+    return;
+  }
+  host.innerHTML = verseHTML(ANCHOR_VERSE);
+  document.body.classList.add('verses-on');
+  playVerses(host);
+}
+
+/* Verse fades as it scrolls up toward the topbar */
+function updateVerseScrollFade() {
+  const host = document.getElementById('welcomeVerseHost');
+  const content = document.getElementById('content');
+  if (!host || !content) return;
+  const y = content.scrollTop;
+  const o = Math.max(0, 1 - y / 140);
+  host.style.opacity = o;
+}
+
+/* ─────────────────────────────────────────────
+   Scan
+   ───────────────────────────────────────────── */
+function startScan(mode) {
+  if (state.scanning) return;
+  state.scanning = true;
+  state.scanned = false;
+  state.notices = [];
+  state.items = [];
+  state.selected.clear();
+  haptic('medium');
+
+  const label = document.getElementById(mode === 'quick' ? 'scanBtnLabel' : 'reviewBtnLabel');
+  const dots  = document.getElementById(mode === 'quick' ? 'scanDots'    : 'reviewDots');
+  const btn   = document.getElementById(mode === 'quick' ? 'scanBtn'     : 'reviewScanBtn');
+  const originalLabel = label.textContent;
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = 'Scanning';
+  if (dots)  dots.style.display = 'inline';
+
+  updateResults();
+
+  let p = 0;
+  const t = setInterval(() => {
+    p += 8 + Math.random() * 14;
+    if (p >= 100) {
+      clearInterval(t);
+      state.scanning = false;
+      state.scanned = true;
+      state.items = mode === 'quick' ? QUICK_ITEMS.slice() : ONDEMAND_ITEMS.slice();
+      state.notices = mode === 'quick'
+        ? ['Shizuku is not running — Android/data and Android/obb were skipped.']
+        : [];
+      if (btn) btn.disabled = false;
+      if (label) label.textContent = originalLabel;
+      if (dots)  dots.style.display = 'none';
+      haptic('success');
+      updateResults();
+      updateFab();
+    }
+  }, 180);
+}
+
+function updateResults() {
+  const quick = state.items.filter(i => i.category !== 'Large files' && i.category !== 'Duplicates');
+  const onDemand = state.items.filter(i => i.category === 'Large files' || i.category === 'Duplicates');
+  renderNotices('cleanNotices', state.notices);
+  renderNotices('reviewNotices', []);
+  renderResults('cleanResults', quick);
+  renderResults('reviewResults', onDemand);
+}
+
+function renderNotices(id, notices) {
+  const el = document.getElementById(id);
+  if (!notices || !notices.length) { el.innerHTML = ''; return; }
+  el.innerHTML = notices.map(n => '<div class="notice">' + n + '</div>').join('');
+}
+
+function renderResults(id, items) {
+  const el = document.getElementById(id);
+  if (state.scanning) {
+    el.innerHTML = '<div class="empty"><span class="empty-glyph">✦</span>Scanning…</div>';
+    return;
+  }
+  if (!state.scanned) {
+    el.innerHTML = '<div class="empty"><span class="empty-glyph">◐</span>Nothing scanned yet. Run a scan to see what could be removed — you decide what goes.</div>';
+    return;
+  }
+  if (!items.length) {
+    el.innerHTML = '<div class="empty"><span class="empty-glyph">✓</span>Nothing found here.</div>';
+    return;
+  }
+  const groups = {};
+  items.forEach(i => { (groups[i.category] = groups[i.category] || []).push(i); });
+
+  let html = '';
+  for (const cat of Object.keys(groups)) {
+    const list = groups[cat];
+    const total = list.reduce((s, i) => s + i.sizeBytes, 0);
+    html += '<div class="section-head">' +
+      '<span class="section-title">' + cat + '</span>' +
+      '<span class="section-meta">' + list.length + ' · ' + fmt(total) + '</span>' +
+    '</div>';
+    list.forEach(item => {
+      const on = state.selected.has(item.path);
+      const riskCls = item.risk === 'SAFE' ? 'tag-safe' : item.risk === 'ELEVATED' ? 'tag-check' : 'tag-danger';
+      const riskLbl = item.risk === 'SAFE' ? 'Low risk' : item.risk === 'ELEVATED' ? 'Check first' : 'May be personal';
+      const confLbl = item.confidence === 'HIGH' ? 'Strong evidence' : item.confidence === 'MEDIUM' ? 'Some evidence' : 'Weak evidence';
+      html += '<div class="item ' + (on ? 'selected' : '') + '" onclick="toggleItem(\'' + esc(item.path) + '\')">' +
+        '<div class="check"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>' +
+        '<div class="item-body">' +
+          '<div class="item-name">' + item.displayName + '</div>' +
+          '<div class="item-reason">' + item.reason + '</div>' +
+          '<div class="item-path">' + item.path + '</div>' +
+          '<div class="item-tags">' +
+            '<span class="tag ' + riskCls + '">' + riskLbl + '</span>' +
+            '<span class="tag tag-neutral">' + confLbl + '</span>' +
+            (item.reversibility === 'NOT_REVERSIBLE' ? '<span class="tag tag-neutral">No undo</span>' : '') +
+            (item.requiresShizuku ? '<span class="tag tag-neutral">Shizuku</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="item-size">' + fmt(item.sizeBytes) + '</div>' +
+      '</div>';
+    });
+  }
+  el.innerHTML = html;
+}
+
+function toggleItem(path) {
+  if (state.selected.has(path)) {
+    state.selected.delete(path);
+    haptic('tick');
+  } else {
+    state.selected.add(path);
+    haptic('light');
+  }
+  updateResults();
+  updateFab();
+}
+
+function updateFab() {
+  const fab = document.getElementById('fab');
+  const onAction = state.currentScreen === 'clean' || state.currentScreen === 'review';
+  if (onAction && state.selected.size > 0 && !state.scanning) {
+    fab.classList.remove('hidden');
+    const bytes = state.items
+      .filter(i => state.selected.has(i.path))
+      .reduce((s, i) => s + i.sizeBytes, 0);
+    document.getElementById('fabCount').textContent = state.selected.size;
+    document.getElementById('fabSize').textContent = fmt(bytes);
+  } else {
+    fab.classList.add('hidden');
+  }
+}
+
+function requestClean() {
+  const items = state.items.filter(i => state.selected.has(i.path));
+  if (!items.length) return;
+  haptic('medium');
+  const total = items.reduce((s, i) => s + i.sizeBytes, 0);
+  document.getElementById('confirmTitle').textContent = 'Delete ' + items.length + ' item' + (items.length > 1 ? 's' : '') + '?';
+  document.getElementById('confirmSub').innerHTML =
+    'Frees about <strong style="color:var(--ink)">' + fmt(total) + '</strong> — file sizes, not disk blocks.';
+
+  let warnHtml = '';
+  if (items.some(i => i.reversibility === 'NOT_REVERSIBLE')) {
+    warnHtml += '<div class="warn-banner">Deleted for good — CleanForge has no recycle bin.</div>';
+  }
+  if (items.some(i => i.risk !== 'SAFE')) {
+    warnHtml += '<div class="warn-banner">Some items aren\'t plain caches and may be personal. Check every path below before confirming.</div>';
+  }
+  document.getElementById('confirmWarn').innerHTML = warnHtml;
+  document.getElementById('confirmEvidence').innerHTML = items.map(i =>
+    '<div class="evidence-item">' +
+      '<div class="evidence-path">' + i.path + '</div>' +
+      '<div class="evidence-meta"><strong>' + i.category + '</strong> · ' + fmt(i.sizeBytes) + '</div>' +
+      '<div class="evidence-meta">Why flagged: ' + i.reason + '</div>' +
+      '<div class="evidence-meta">Confidence: ' + i.confidence + ' · Risk: ' + i.risk + (i.requiresShizuku ? ' · via Shizuku' : '') + '</div>' +
+    '</div>'
+  ).join('');
+  document.getElementById('confirmDialog').classList.remove('hidden');
+}
+
+function confirmDelete() {
+  haptic('heavy');
+  closeDialog('confirmDialog');
+  showProgress();
+}
+
+function showProgress() {
+  const items = state.items.filter(i => state.selected.has(i.path));
+  const total = items.length;
+  const totalBytes = items.reduce((s, i) => s + i.sizeBytes, 0);
+  let done = 0;
+  document.getElementById('progressDialog').classList.remove('hidden');
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressLabel').textContent = '0 of ' + total + ' · freed 0 B';
+  const t = setInterval(() => {
+    done++;
+    const pct = (done / total) * 100;
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent =
+      done + ' of ' + total + ' · freed ' + fmt(totalBytes * (done / total));
+    haptic('tick');
+    if (done >= total) {
+      clearInterval(t);
+      setTimeout(() => { closeDialog('progressDialog'); showReport(totalBytes); }, 420);
+    }
+  }, 620);
+  state._progressTimer = t;
+}
+
+function stopCleaning() {
+  clearInterval(state._progressTimer);
+  haptic('warn');
+  closeDialog('progressDialog');
+  showReport(0);
+}
+
+function showReport(freed) {
+  haptic(freed > 0 ? 'success' : 'warn');
+  document.getElementById('reportTitle').textContent = freed > 0 ? 'All done' : 'Stopped';
+  let html;
+  if (freed > 0) {
+    html = '<div class="report-big">' + fmt(freed) + '</div>' +
+      '<p class="sheet-body">Everything you confirmed has been removed. Anything already removed stays removed.</p>';
+  } else {
+    html = '<p class="sheet-body">Nothing was deleted. Your files are exactly where you left them.</p>';
+  }
+  document.getElementById('reportBody').innerHTML = html;
+  document.getElementById('reportDialog').classList.remove('hidden');
+  state.selected.clear();
+  state.items = [];
+  state.scanned = false;
+  updateResults();
+  updateFab();
+}
+
+function closeDialog(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+function updateRam() {
+  const frac = Math.min(1, state.ramUsed / state.ramTotal);
+  document.getElementById('ramPct').textContent = Math.round(frac * 100) + '%';
+  document.getElementById('ramUsed').textContent = fmt(state.ramUsed) + ' used of ' + fmt(state.ramTotal);
+  document.getElementById('ramAvail').textContent = fmt(state.ramAvailable) + ' available';
+  const C = 2 * Math.PI * 78;
+  const ring = document.getElementById('ramRing');
+  ring.setAttribute('stroke-dasharray', C);
+  ring.setAttribute('stroke-dashoffset', C * (1 - frac));
+  let pressure = 'Low', color = 'var(--sage)';
+  if (frac > 0.85) { pressure = 'Critical'; color = 'var(--brick)'; }
+  else if (frac > 0.7) { pressure = 'High'; color = 'var(--clay)'; }
+  else if (frac > 0.5) { pressure = 'Moderate'; color = 'var(--amber)'; }
+  document.getElementById('ramPressure').textContent = pressure;
+  ring.setAttribute('stroke', color);
+}
+
+function clearRam() {
+  const btn = document.getElementById('clearRamBtn');
+  btn.disabled = true;
+  btn.textContent = 'Clearing…';
+  haptic('medium');
+  setTimeout(() => {
+    const freed = 400_000_000 + Math.random() * 320_000_000;
+    state.ramUsed = Math.max(1_000_000_000, state.ramUsed - freed);
+    state.ramAvailable = state.ramTotal - state.ramUsed;
+    updateRam();
+    document.getElementById('ramResult').textContent =
+      'Freed ' + fmt(freed) + '. Android may reload apps, using more battery.';
+    btn.disabled = false;
+    btn.textContent = 'Clear background apps';
+    haptic('success');
+  }, 1500);
+}
+
+function updateHero() {
+  const frac = (state.totalBytes - state.freeBytes) / state.totalBytes;
+  document.getElementById('heroPct').textContent = Math.round(frac * 100) + '%';
+  document.getElementById('heroFree').textContent = fmt(state.freeBytes);
+  document.getElementById('heroTotal').textContent = 'free of ' + fmt(state.totalBytes);
+  const C = 2 * Math.PI * 43;
+  const ring = document.getElementById('heroRing');
+  ring.setAttribute('stroke-dasharray', C);
+  requestAnimationFrame(() => {
+    ring.setAttribute('stroke-dashoffset', C * (1 - frac));
+  });
+}
+
+function syncToggleUI() {
+  const ds = document.getElementById('darkSwitch');
+  if (ds) {
+    ds.classList.toggle('on', prefs.dark);
+    ds.setAttribute('aria-checked', String(prefs.dark));
+  }
+}
+
+/* Easter egg — 7 taps on forge card toggles verses */
+let forgeTaps = 0;
+let forgeTimer = null;
+document.getElementById('forgeCard').addEventListener('click', () => {
+  forgeTaps++;
+  haptic('tick');
+  clearTimeout(forgeTimer);
+  forgeTimer = setTimeout(() => { forgeTaps = 0; }, 1400);
+  if (forgeTaps >= 7) {
+    forgeTaps = 0;
+    haptic('medium');
+    document.getElementById('easterEggDialog').classList.remove('hidden');
+  }
+});
+
+function confirmEasterEgg() {
+  closeDialog('easterEggDialog');
+  prefs.verses = !prefs.verses;
+  savePrefs();
+  renderWelcomeVerse();
+  haptic(prefs.verses ? 'success' : 'warn');
+  toast(prefs.verses ? 'Verses on' : 'Verses off');
+}
+
+function openAllFilesSettings() { haptic('light'); toast('Opening All-files access settings…'); }
+function checkShizuku()          { haptic('light'); toast('Checking Shizuku status…'); }
+
+const contentEl = document.getElementById('content');
+contentEl.addEventListener('scroll', () => {
+  const scrolled = contentEl.scrollTop > 20;
+  document.getElementById('topbar').classList.toggle('scrolled', scrolled);
+  updateVerseScrollFade();
+}, { passive: true });
+
+window.addEventListener('resize', updateDockPill);
+
+applyTheme(false);
+renderTitle(TITLES.clean.title);
+document.getElementById('topSub').textContent = TITLES.clean.sub;
+updateHero();
+updateRam();
+updateResults();
+updateFab();
+syncToggleUI();
+renderWelcomeVerse();
+updateVerseScrollFade();
+
+requestAnimationFrame(() => requestAnimationFrame(updateDockPill));
+window.addEventListener('load', updateDockPill);
+setTimeout(updateDockPill, 200);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    ['confirmDialog','progressDialog','reportDialog','easterEggDialog'].forEach(closeDialog);
+  }
+});
+</script>
+</body>
+</html>
+
+----- file: ./CHANGELOG.md -----
+# Changelog
+
+All notable changes to CleanForge. Format follows [Keep a Changelog](https://keepachangelog.com/).
+
+---
+
+## [1.0.0] — Part 5: UI/UX Polish & CI/CD
+
+### Added
+- GitHub Actions CI pipeline: unit tests, lint, debug + release APK builds
+- Gradle wrapper binary committed and validated in CI
+- Material 3 dynamic color on Android 12+, static scheme on Android 11
+- RAM gauge integrated into Home screen as an expandable card
+- `LazyColumn` keys changed from path-only to category+path (fixes crash on duplicate paths)
+- Final Compose UI polish: animations, transitions, empty states
+
+### Changed
+- `PolicyGuardTest`: lint gate now hard-fails on `abortOnError` with `-PstrictLint`
+- NavHost: RAM screen accessible via Home card tap or direct nav route
+
+### Fixed
+- Gradle wrapper missing binary (CI now generates and validates it)
+- Review screen crash when a path is flagged by two scanners simultaneously
+
+---
+
+## [0.5.0] — Part 4: RAM Monitoring
+
+### Added
+- `core/memory/RamSnapshot.kt` — honest memory reading with `MemoryPressure` levels
+- `core/memory/MemInfoParser.kt` — pure `/proc/meminfo` parser (no I/O, fully testable)
+- `core/memory/MemoryInfoProvider.kt` — `ProcMemInfoProvider` reads `/proc/meminfo`
+- `core/memory/ClearMemoryResult.kt` — measured freed bytes, never estimated
+- `domain/usecase/ObserveRamUseCase.kt` — periodic `Flow<RamSnapshot>`
+- `domain/usecase/ClearMemoryUseCase.kt` — honest `killBackgroundProcesses` with measured delta
+- `ui/RamViewModel.kt` — StateFlow-based UI state, start/stop observation
+- `ui/screens/RamScreen.kt` — circular gauge, pressure colors, honest explainer
+- `KILL_BACKGROUND_PROCESSES` permission (documented, deliberate, not creep)
+- `MemInfoParserTest.kt` — 8 tests covering parsing, fallbacks, pressure, corruption
+- `ClearMemoryUseCaseTest.kt` — 4 tests covering honest measurement, UNKNOWN state, exceptions
+
+### Changed
+- `PolicyGuardTest.kt`: permission assertion updated from 2 → 3 permissions
+- `di/AppModule.kt`: added `ActivityManager` and `MemoryInfoProvider` bindings
+
+### Design Decisions
+- No "boost" claims. UI explicitly states Android manages RAM intentionally.
+- `freedBytes` is measured from `MemAvailable` delta, clamped to ≥ 0.
+- Packages in `InstallState.UNKNOWN` are never killed (fail-closed).
+
+---
+
+## [0.4.0] — Part 3: Storage Forensics
+
+### Added
+- `CleaningCategory.FORENSIC_MEDIA` — app-specific media & caches, `isQuick = false`
+- `core/scanner/WhatsAppScanner.kt` — `.Statuses` (>24h), `Sent` folders, old DB backups (>7d)
+- `core/scanner/TelegramScanner.kt` — Video/Audio/Images/Documents cache (>14d)
+- `core/scanner/TikTokScanner.kt` — video + `.music` cache (>7d)
+- `core/scanner/TwitterXScanner.kt` — media cache (>7d)
+- `core/scanner/InstagramScanner.kt` — media cache (>14d)
+- `SafetyValidator.isKnownForensicPath()` — strict allowlist for forensic paths
+- `ProtectedApps.MESSAGING` set — messaging apps never pre-selected
+- `docs/FORENSICS_MATRIX.md` — full forensic scanner documentation
+
+### Changed
+- `SafetyValidator.kt`: `FORENSIC_MEDIA` allowed in `Android/media` and `Android/data` via allowlist
+- `SafetyValidator.kt`: personal folder protection extended to block forensic rules
+- `ScanItem.kt`: `reasonForFlagging` field for evidence-based UI display
+- `Enums.kt`: `FORENSIC_MEDIA` category added
+
+### Security
+- Forensic paths are allowlisted per-package, per-subfolder. No wildcard `Android/data` access.
+- All forensic items: `isPreselected = false`, `requiresShizuku = true`, `DeleteMode.FILE`
+- WhatsApp/Telegram/Instagram in `ProtectedApps.MESSAGING` — extra caution layer
+
+---
+
+## [0.3.0] — Part 2: Shizuku Engine
+
+### Added
+- `core/shizuku/ShizukuFileServiceConnector.kt` — bind/unbind/death/reconnect lifecycle
+- `core/shizuku/ShizukuFileService.kt` — AIDL user-service implementation
+- `core/shizuku/AidlPrivilegedFileApi.kt` — typed adapter over raw AIDL
+- `core/privileged/FileServiceCore.kt` — privileged-side file operations
+- `core/privileged/WireCodec.kt` — serialization for binder transport
+- `core/privileged/PrivilegedExecutor.kt` — centralized execution, accepts `MaintenanceRequest` not raw paths
+- `core/backend/ShizukuFileBackend.kt` — read-only Shizuku backend (no delete)
+- `core/backend/Capabilities.kt` — runtime capability detection
+- `core/backend/PackageInventory.kt` — tri-state `installState()` (INSTALLED / NOT_INSTALLED / UNKNOWN)
+- `core/shizuku/ShizukuManager.kt` — Shizuku lifecycle state holder
+- `app/src/main/aidl/com/cleanforge/shizuku/IFileService.aidl` — versioned AIDL contract
+- `docs/SHIZUKU_CAPABILITY_MATRIX.md` — operation support matrix
+- 25 new Shizuku-specific tests
+
+### Changed
+- `CacheScanner`: uses Shizuku backend for `Android/data/<pkg>/cache`
+- `CorpseScanner`: uses Shizuku backend for `Android/data` and `Android/obb` leftovers
+- `CleaningEngine`: re-validates Shizuku availability before every privileged deletion
+- `CleanViewModel`: Shizuku state exposed via `StateFlow`, actionable error states in UI
+- `PolicyGuardTest`: 4 new guards for privileged surface (no shell, no generic delete, AIDL versioning, no direct Shizuku API in UI)
+
+### Security
+- Shizuku service runs as user-service, NOT root
+- AIDL contract uses fixed transaction IDs (only grows, never reassigns)
+- `setProtectedPackages` prevents privileged deletion of messaging app data
+- Service death → operation halts → auto-rebind → user informed
+
+---
+
+## [0.2.1] — Security Re-Audit
+
+### Fixed
+- H1: `MATCH_UNINSTALLED_PACKAGES` no longer used as proof of "installed"
+- M1: Confirmation dialog shows full evidence for every item
+- M2: Duplicate keeper chosen by user, not by age
+- M3: Child-level TOCTOU narrowed (lstat re-check before every remove)
+- M4: Multi-user wording corrected (current user/profile only)
+
+---
+
+## [0.2.0] — Part 1: Audit & Refactor
+
+### Added
+- Complete project restructure to standard Gradle layout
+- `SafeDeleter` — bounded, symlink-safe, mount-aware deletion
+- `SafetyValidator` — lexical + policy gate for every deletion
+- `PlanBuilder` — refusal tracking with human-readable reasons
+- `CleaningEngine` — revalidation at execution time
+- 9 evidence-based scanners
+- Material 3 UI with 3-tab navigation
+- 66 JUnit tests across 6 suites
+- `PROJECT_AUDIT.md`, `BUILD.md`, `SECURITY.md`
+
+### Removed
+- Hidden API usage (`IPackageManager`, `IPackageDataObserver`, `AppGlobals`)
+- Untrusted Maven repository (`api.xposed.info`)
+- Unused dependencies (Room, WorkManager, DataStore)
+- Broken navigation references to non-existent screens
+
+### Fixed
+- 10 build blockers (B1–B10)
+- 9 safety/data-loss findings (S1–S9)
+
+---
+
+## [0.1.0] — Original Scaffold
+
+- AI-generated project scaffold (pre-audit)
+- 35 source files, 2 test classes
+- Multiple critical issues (see PROJECT_AUDIT.md)
+----- file: ./docs/PART5_AUDIT_UPDATE.md -----
+# CleanForge — Part 5 Integration & Security Audit Update
+
+Status: **In progress — not release-ready yet**  
+Scope: **Whole-project integration, security audit, feature verification, build/release preparation**  
+Audit method: **Static code review and architecture inspection only**  
+Important: **No Gradle build, unit test, emulator test, or physical-device test has been executed as part of this audit.**
+
+---
+
+## 1. Purpose of this document
+
+This document records the current state of the CleanForge Part 5 audit.
+
+It covers:
+
+- what has been audited so far,
+- what was found,
+- what has been fixed or must be fixed,
+- what remains unsupported or unresolved,
+- what must be verified before release.
+
+This is intended to be a living repository document until the final release verdict is produced.
+
+---
+
+## 2. High-level status
+
+| Area | Status |
+|---|---|
+| Gradle wrapper and build structure | Audited, structurally sound |
+| Manifest and permissions | Audited, strong privacy posture |
+| Shizuku integration | Audited, strong trust-boundary design |
+| Storage forensics core | Audited, strong safety model |
+| RAM diagnostics | Audited, honest measurement model |
+| Dependency injection | Issues found, fixes defined |
+| Cleanup execution engine | Not fully audited yet |
+| UI / ViewModel wiring | Not fully audited yet |
+| Automated test execution | Not executed yet |
+| Documentation reconciliation | Pending |
+| Release readiness | **Not ready until Phase 5–7 are completed** |
+
+---
+
+## 3. Audit environment limitations
+
+The following limitations apply to this audit:
+
+1. The audit was performed by reviewing provided source excerpts and repository structure.
+2. No Gradle build was executed in this environment.
+3. No unit tests were executed in this environment.
+4. No emulator or physical-device verification was performed.
+5. No Shizuku authorization flow was exercised on a device.
+6. No destructive filesystem operation was performed during the audit.
+
+Any statement in this document saying a feature is “verified” means:
+
+> verified by code inspection and architectural review, not by executed runtime testing.
+
+---
+
+# Phase 1 — Build System, Manifest, and Project Structure
+
+## 4.1 Project structure
+
+The repository uses a clean and maintainable architecture:
+
+```text
+core/backend
+core/cleaning
+core/fs
+core/memory
+core/model
+core/privileged
+core/safety
+core/scanner
+core/shizuku
+data/repository
+domain/usecase
+di
+ui
+```
+
+This separation is appropriate and supports:
+
+- testability,
+- security boundaries,
+- future maintenance,
+- clear dependency direction.
+
+No obvious circular dependency was identified in the audited layers.
+
+---
+
+## 4.2 Gradle wrapper
+
+Verified from repository contents:
+
+- `gradlew`
+- `gradlew.bat`
+- `gradle/wrapper/gradle-wrapper.jar`
+- `gradle/wrapper/gradle-wrapper.properties`
+
+Wrapper configuration:
+
+```properties
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
+```
+
+Verdict:
+
+- Wrapper files appear present.
+- Wrapper version is modern and appropriate.
+- No wrapper repair is currently required.
+
+---
+
+## 4.3 Android build configuration
+
+Key settings:
+
+```kotlin
+compileSdk = 35
+minSdk = 30
+targetSdk = 35
+```
+
+Important implications:
+
+- CleanForge targets Android 11+ only.
+- This is appropriate for the storage model used.
+- `MANAGE_EXTERNAL_STORAGE` is required for broad shared-storage access.
+- `Android/data` and `Android/obb` require Shizuku-backed access.
+
+Release signing:
+
+- Signing configuration reads from optional `keystore.properties`.
+- This is the correct secret-handling approach.
+- No signing credentials were found committed in the reviewed build files.
+
+Application ID:
+
+```kotlin
+applicationId = "com.cleanforge"
+```
+
+Recommendation:
+
+- Before public release, choose a unique reverse-domain application ID, for example:
+
+```text
+io.github.lightibulb.cleanforge
+```
+
+Changing the application ID later will break updates.
+
+---
+
+## 4.4 Manifest audit
+
+Important manifest properties:
+
+```xml
+<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+<uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+```
+
+Strong privacy property:
+
+```text
+The app declares NO INTERNET permission.
+```
+
+This is a major privacy advantage. It prevents telemetry, remote code fetching, and network-based data leakage.
+
+Other observations:
+
+- `android:allowBackup="false"` is good for privacy and forensic hygiene.
+- Shizuku provider declaration matches the expected Shizuku API integration pattern.
+- `QUERY_ALL_PACKAGES` is justified for package-based cleanup correctness.
+- `KILL_BACKGROUND_PROCESSES` is justified for the honest RAM trim feature.
+
+Verdict:
+
+- Manifest permissions are narrowly scoped and purpose-specific.
+- No excessive permission was identified.
+
+---
+
+# Phase 2 — Shizuku Integration and Trust Boundary
+
+## 5.1 Shizuku architecture
+
+CleanForge separates:
+
+1. The ordinary Android app process.
+2. The privileged Shizuku-started service process.
+
+The privileged service is the only place where privileged filesystem work happens.
+
+Key classes:
+
+```text
+ShizukuManager
+ShizukuFileServiceConnector
+ShizukuFileService
+FileServiceCore
+PrivilegedExecutor
+ShizukuFileBackend
+```
+
+---
+
+## 5.2 Security model
+
+The Shizuku integration follows a zero-trust model:
+
+- The privileged service does not blindly trust the app process.
+- Every path is revalidated.
+- No shell execution is used.
+- No command-line construction is used.
+- No arbitrary path deletion is exposed.
+- Deletion shapes are intentionally restricted.
+
+---
+
+## 5.3 Important security controls
+
+### Path validation
+
+`PathRules` enforces:
+
+- canonical root containment,
+- rejection of relative segments,
+- rejection of `..`,
+- rejection of empty path segments,
+- rejection of trailing slash,
+- rejection of over-long paths,
+- rejection of control characters.
+
+### Symlink safety
+
+The privileged service verifies that every ancestor below the storage root is a real directory.
+
+This prevents symlink-based escape from approved zones.
+
+### Binder transaction safety
+
+Listing results are capped:
+
+```kotlin
+const val MAX_NAMES = 20_000
+const val MAX_LIST_CHARS = 120_000
+```
+
+This protects against `TransactionTooLargeException`.
+
+### Deletion safety
+
+The privileged service currently supports only two recursive deletion shapes:
+
+1. `DeleteMode.TREE` for:
+
+```text
+Android/data/<pkg>
+Android/obb/<pkg>
+```
+
+2. `DeleteMode.CONTENTS_ONLY` for:
+
+```text
+Android/data/<pkg>/cache
+```
+
+This is intentionally restrictive.
+
+### Installed-apps guard
+
+For tree deletions, the app must push an installed-apps guard.
+
+A tree deletion is refused if:
+
+- the guard is missing,
+- the target package is known to Android,
+- the target package is CleanForge itself.
+
+This protects against accidental deletion of installed app data.
+
+---
+
+## 5.4 Shizuku lifecycle handling
+
+Strong points:
+
+- Fresh `ServiceConnection` per bind attempt.
+- Mutex-guarded binding.
+- Timeouts for bind operations.
+- API version validation.
+- Invalidation on service death.
+- Explicit unavailable reasons.
+
+This avoids several common Shizuku integration bugs:
+
+- stale binder references,
+- late callbacks from abandoned binds,
+- silent service death,
+- permission-state confusion.
+
+---
+
+## 5.5 Honest failure handling
+
+`PrivilegedExecutor` does not silently treat uncertain deletions as successful.
+
+If a deletion call dies or times out, the executor re-observes the target and returns one of:
+
+- `Success` only when post-state confirms removal,
+- `Unverified` when outcome cannot be confirmed,
+- `Failure` when failure is known,
+- `Unsupported` when capability is unavailable.
+
+This satisfies the product rule:
+
+> A failed cleanup must not report the requested space reclaimed.
+
+---
+
+# Phase 3 — Storage Forensics, Traversal, and Deletion Safety
+
+## 6.1 Filesystem operations
+
+Core filesystem access is based on `FsOps`.
+
+The real implementation uses:
+
+```kotlin
+android.system.Os.lstat
+android.system.Os.remove
+```
+
+Important properties:
+
+- symlinks are not followed,
+- `lstat` semantics are used,
+- deletion uses unlink/remove semantics,
+- no shell is used.
+
+---
+
+## 6.2 StorageWalker
+
+`StorageWalker` is bounded and safe:
+
+- uses explicit stack traversal,
+- does not recurse,
+- checks mount boundaries via `st_dev`,
+- enforces `maxDepth`,
+- enforces `maxEntries`,
+- filters unsafe names using `isPlainName`,
+- reports unreadable directories,
+- reports truncation.
+
+Important safety method:
+
+```kotlin
+fun isPlainName(name: String): Boolean =
+    name.isNotEmpty() &&
+    name != "." &&
+    name != ".." &&
+    name.none { it == '/' || it == '\u0000' }
+```
+
+This prevents path escape through malicious directory-entry names.
+
+---
+
+## 6.3 Directory size calculation
+
+`StorageWalker.sizeOf` returns:
+
+```kotlin
+SizeResult(bytes, complete, unreadable)
+```
+
+Important honesty property:
+
+- If traversal is truncated, `complete = false`.
+- If unreadable directories exist, `unreadable > 0`.
+- In either case, the size is a lower bound, not an exact figure.
+
+This supports the rule:
+
+> A failed or partial scan must not become a successful empty scan.
+
+---
+
+## 6.4 SafeDeleter
+
+`SafeDeleter` is the single deletion implementation.
+
+It enforces:
+
+- symlink roots are refused,
+- symlink children are unlinked as links only,
+- recursion depth is bounded,
+- entry count is bounded,
+- mount boundaries are not crossed,
+- identity is rechecked before deletion,
+- cancellation is checked between entries,
+- no shell is used.
+
+It also documents a realistic residual TOCTOU risk:
+
+- re-check and remove are separate path-based calls,
+- Android/Kotlin does not currently expose `unlinkat`/`openat` conveniently,
+- a hostile local writer with access to the same directory could theoretically race the deletion,
+- but a symlink-following delete is still prevented.
+
+This is an acceptable documented residual risk for the current threat model.
+
+---
+
+## 6.5 Scanner architecture
+
+Scanners are evidence-based classifiers.
+
+Important design rule:
+
+> A discovered candidate must not automatically become a deletion target.
+
+Scanners emit `ScanItem` proposals with:
+
+- path,
+- size,
+- evidence,
+- confidence,
+- risk,
+- category,
+- fingerprint,
+- deletion mode,
+- reversibility.
+
+The user must still confirm a plan before deletion.
+
+---
+
+## 6.6 Duplicate scanner
+
+The duplicate scanner uses staged hashing:
+
+1. group by exact size,
+2. SHA-256 of first 64 KB,
+3. full SHA-256 only for survivors.
+
+Important correctness properties:
+
+- hard links to the same inode are not treated as duplicates,
+- cancellation checkpoints exist,
+- batches are emitted to bound UI memory,
+- the scanner does not choose which copy the user values.
+
+Known resource concern:
+
+- The intermediate size/hash maps can grow large on devices with many large files.
+- This is a medium-severity resource issue, not a correctness bug.
+
+Recommendation:
+
+- consider explicit caps,
+- consider pruning singleton groups earlier,
+- consider reporting truncation if candidate sets become too large.
+
+---
+
+## 6.7 Corpse scanner
+
+The corpse scanner uses strong evidence:
+
+- valid package-name folder,
+- package unknown to the OS,
+- not merely “uninstalled with data kept”,
+- real directory,
+- minimum age threshold,
+- size measurement,
+- elevated risk,
+- never preselected.
+
+This is a strong forensic model.
+
+---
+
+# Phase 4 — RAM Diagnostics, Use Cases, Repository, and DI
+
+## 7.1 RAM diagnostics model
+
+CleanForge’s RAM diagnostics are honest by design.
+
+`RamSnapshot` is based on available memory, not naive “used memory”.
+
+Memory pressure classification:
+
+```text
+<= 5% available  -> CRITICAL
+<= 12% available -> HIGH
+<= 30% available -> NORMAL
+otherwise        -> LOW
+```
+
+Important product rule:
+
+> CleanForge must not falsely claim that clearing RAM improves performance.
+
+The current core model respects this rule.
+
+---
+
+## 7.2 Memory measurement
+
+`MemInfoProvider` reads `/proc/meminfo`.
+
+Properties:
+
+- no special permission required,
+- no shell,
+- no network,
+- returns `null` when unavailable,
+- never invents zero as a real measurement.
+
+`MemInfoParser` is pure and testable.
+
+---
+
+## 7.3 Honest RAM clear
+
+The RAM clear feature measures the delta in available memory.
+
+It must not estimate freed memory.
+
+Correct behavior:
+
+- If available memory rises, report the measured delta.
+- If available memory does not rise, report zero freed.
+- If memory info is unavailable, say so.
+
+---
+
+# Phase 4 Findings
+
+The following findings were identified during Phase 4.
+
+| ID | Severity | Finding | Status |
+|---|---:|---|---|
+| P4-01 | High | `ClearMemoryUseCase` bypassed `BackgroundProcessKiller` | Fix defined |
+| P4-02 | High | Forensic/media scanners missing from Hilt DI | Fix defined |
+| P4-03 | High | `AppModule.kt` missing imports | Fix defined |
+| P4-04 | Medium | `ScanRepository` lacked single-flight scan guard | Fix defined |
+| P4-05 | Medium | Some Shizuku scanners omitted `privilegedOperations` | Partially addressed |
+| P4-06 | Low | `ClearMemoryUseCase` lacked cancellation checkpoints | Fixed in rewrite |
+| P4-07 | Low | `processesTouched` semantics were misleading | Fixed in rewrite |
+| P4-08 | Low | `ObserveRamUseCase` silent provider failure | Documented, not release-blocking |
+| P4-09 | Critical | `SafetyValidator` refused all forensic media inside `Android/media` | Fix defined |
+| P4-10 | Critical | WhatsApp/Telegram scanners incorrectly targeted Shizuku backend for `Android/media` | Fix defined |
+| P4-11 | High | `ClearMemoryUseCaseTest` used Mockito and old constructor | Fix defined |
+| P4-12 | High | Instagram/TikTok/Twitter scanners cannot be safely wired under current deletion model | Mitigated by keeping them unwired |
+| P4-13 | Medium | Instagram/TikTok/Twitter scanners lacked `privilegedOperations` | Metadata fix defined |
+| P4-14 | Low/Medium | `ClearMemoryUseCase` excerpt appeared inside `BackgroundProcessKiller.kt` | File separation fix defined |
+
+---
+
+# Detailed Phase 4 Fixes
+
+## 8.1 P4-01 — `ClearMemoryUseCase` must use `BackgroundProcessKiller`
+
+### Problem
+
+The original use case called:
+
+```kotlin
+activityManager.killBackgroundProcesses(pkg)
+```
+
+directly.
+
+This bypassed the intended safety seam:
+
+```kotlin
+BackgroundProcessKiller
+```
+
+That class is responsible for skipping:
+
+- CleanForge itself,
+- system apps,
+- unknown app types.
+
+### Required fix
+
+`ClearMemoryUseCase` must depend on `BackgroundProcessKiller`.
+
+The corrected constructor is:
+
+```kotlin
+class ClearMemoryUseCase @Inject constructor(
+    private val killer: BackgroundProcessKiller,
+    private val inventory: PackageInventory,
+    private val provider: MemoryInfoProvider
+)
+```
+
+The corrected loop is:
+
+```kotlin
+for (pkg in installed) {
+    if (count++ % 64 == 0) {
+        currentCoroutineContext().ensureActive()
+    }
+
+    if (killer.kill(pkg)) {
+        requested++
+    }
+}
+```
+
+### Result
+
+- System apps are skipped.
+- CleanForge itself is skipped.
+- Unknown apps are skipped fail-closed.
+- `processesTouched` now counts actual requests sent, not every package considered.
+
+---
+
+## 8.2 P4-02 — Forensic scanners missing from DI
+
+### Problem
+
+The project tree contained forensic scanners, but `AppModule.provideScanners()` did not include them.
+
+That meant the scanners existed in source but would never run.
+
+### Fix decision
+
+Only scanners that can be safely executed with the current architecture should be wired.
+
+Therefore:
+
+- WhatsApp and Telegram scanners are wired.
+- Instagram, TikTok, and Twitter/X scanners remain unwired for now.
+
+Reason:
+
+- WhatsApp/Telegram scan `Android/media/...`.
+- `Android/media` is accessible via `MANAGE_EXTERNAL_STORAGE`.
+- Instagram/TikTok/Twitter scan `Android/data/...`.
+- They emit `DeleteMode.FILE` items.
+- The privileged service currently does not support scoped `DeleteMode.FILE` deletion under `Android/data`.
+
+Wiring them now would create scan items that cannot be safely cleaned.
+
+---
+
+## 8.3 P4-03 — Missing imports in `AppModule.kt`
+
+### Problem
+
+The provided `AppModule.kt` used:
+
+```kotlin
+ActivityManager
+MemoryInfoProvider
+ProcMemInfoProvider
+BackgroundProcessKiller
+AndroidBackgroundProcessKiller
+PathRules
+WhatsAppScanner
+TelegramScanner
+```
+
+but some required imports were missing.
+
+### Required fix
+
+The rewritten `AppModule.kt` must include all required imports.
+
+Most important additions:
+
+```kotlin
+import com.cleanforge.core.fs.PathRules
+import com.cleanforge.core.memory.AndroidBackgroundProcessKiller
+import com.cleanforge.core.memory.BackgroundProcessKiller
+import com.cleanforge.core.memory.MemoryInfoProvider
+import com.cleanforge.core.memory.ProcMemInfoProvider
+import com.cleanforge.core.scanner.TelegramScanner
+import com.cleanforge.core.scanner.WhatsAppScanner
+```
+
+---
+
+## 8.4 P4-04 — `ScanRepository` single-flight guard
+
+### Problem
+
+`ScanRepository.scan()` mutated shared state without a concurrency guard.
+
+If two scans were started concurrently, results could interleave.
+
+### Required fix
+
+Add a `Mutex`.
+
+```kotlin
+private val scanMutex = Mutex()
+
+fun scan(mode: ScanMode): Flow<ScanProgress> = flow {
+    scanMutex.withLock {
+        // existing scan logic
+    }
+}
+```
+
+Required imports:
+
+```kotlin
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+```
+
+---
+
+## 8.5 P4-09 — `SafetyValidator` refused all forensic media inside `Android/media`
+
+### Problem
+
+`PathRules.isProtectedZone` treats `Android/media` as protected.
+
+The original SafetyValidator step 5 refused:
+
+```kotlin
+CleaningCategory.FORENSIC_MEDIA
+```
+
+inside protected zones.
+
+Because all forensic media items live under `Android/media`, every forensic media item was refused.
+
+### Required fix
+
+SafetyValidator step 5 must allow approved forensic media paths inside `Android/media`, while still protecting top-level personal folders such as DCIM, Pictures, Movies, etc.
+
+Corrected logic:
+
+```kotlin
+if (PathRules.isProtectedZone(c) && item.category != CleaningCategory.THUMBNAIL) {
+    val isAndroidMedia = c.size >= 2 &&
+        c[0].equals("Android", ignoreCase = true) &&
+        c[1].equals("media", ignoreCase = true)
+
+    if (!isAndroidMedia) {
+        if (
+            item.category == CleaningCategory.APP_CACHE ||
+            item.category == CleaningCategory.CORPSE_LEFTOVER ||
+            item.category == CleaningCategory.FORENSIC_MEDIA
+        ) {
+            refuse("Cache/leftover/forensic rules do not apply inside personal folders")
+        }
+    }
+    if (item.isPreselected) refuse("Personal data can never be pre-selected")
+}
+```
+
+---
+
+## 8.6 P4-10 — WhatsApp/Telegram scanners used wrong backend model
+
+### Problem
+
+WhatsApp and Telegram scan:
+
+```text
+Android/media/...
+```
+
+But they originally declared:
+
+```kotlin
+override val requirement = Requirement.SHIZUKU
+requiresShizuku = true
+```
+
+This is incorrect because:
+
+- the Shizuku service read gate only allows `Android/data` and `Android/obb`,
+- `Android/media` is accessible via `MANAGE_EXTERNAL_STORAGE`,
+- the standard backend is the correct backend for these paths.
+
+### Required fix
+
+For WhatsApp and Telegram scanners:
+
+```kotlin
+override val requirement = Requirement.ALL_FILES_ACCESS
+```
+
+and all emitted `ScanItem` instances must use:
+
+```kotlin
+requiresShizuku = false
+```
+
+They must be wired in DI with the standard backend:
+
+```kotlin
+WhatsAppScanner(standard, inventory, PathRules.ROOT),
+TelegramScanner(standard, inventory, PathRules.ROOT)
+```
+
+---
+
+## 8.7 P4-11 — `ClearMemoryUseCaseTest` rewrite
+
+### Problem
+
+The old test:
+
+- used Mockito,
+- tested the old `ActivityManager`-based constructor,
+- did not match the corrected `BackgroundProcessKiller` architecture,
+- may not compile because Mockito is not declared in the visible test dependencies.
+
+### Required fix
+
+Rewrite the test using hand-written test doubles.
+
+The new test should verify:
+
+- measured freed memory,
+- negative delta becomes zero,
+- skipped packages are not counted,
+- unknown or uninstalled packages are not killed,
+- unavailable memory info is honestly reported.
+
+The rewritten test avoids Mockito and uses deterministic fakes.
+
+---
+
+## 8.8 P4-12 — Instagram, TikTok, and Twitter/X scanners
+
+### Problem
+
+These scanners target:
+
+```text
+Android/data/<pkg>/cache
+Android/data/<pkg>/files/.music
+```
+
+and emit:
+
+```kotlin
+deleteMode = DeleteMode.FILE
+requiresShizuku = true
+```
+
+But the privileged service currently supports only:
+
+```text
+TREE for Android/data/<pkg>
+TREE for Android/obb/<pkg>
+CONTENTS_ONLY for Android/data/<pkg>/cache
+```
+
+It does not support scoped `FILE` deletion under `Android/data`.
+
+### Release-safe decision
+
+Do not wire these scanners yet.
+
+They should remain present in source but inactive until one of the following is done:
+
+1. Add audited privileged support for scoped forensic `FILE` deletion under known `Android/data` paths.
+2. Rewrite the scanners to emit supported whole-cache `CONTENTS_ONLY` cleanup items.
+
+Until then, they must not be advertised as active capabilities.
+
+---
+
+## 8.9 P4-13 — Missing `privilegedOperations` metadata
+
+For future correctness, the inactive Instagram/TikTok/Twitter scanners should declare:
+
+```kotlin
+override val privilegedOperations = setOf(
+    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+)
+```
+
+Required import:
+
+```kotlin
+import com.cleanforge.core.privileged.PrivilegedOperation
+```
+
+This does not make them safe to wire by itself, but it makes future capability discovery correct.
+
+---
+
+## 8.10 P4-14 — File separation
+
+`BackgroundProcessKiller.kt` must contain only:
+
+```kotlin
+BackgroundProcessKiller
+AndroidBackgroundProcessKiller
+```
+
+`ClearMemoryUseCase.kt` must contain:
+
+```kotlin
+ClearMemoryUseCase
+```
+
+Do not place use-case code inside the killer file.
+
+---
+
+# Files Changed or Requiring Change
+
+The following files have been changed or must be changed as part of this audit.
+
+## Production code
+
+```text
+app/src/main/java/com/cleanforge/core/memory/BackgroundProcessKiller.kt
+app/src/main/java/com/cleanforge/domain/usecase/ClearMemoryUseCase.kt
+app/src/main/java/com/cleanforge/di/AppModule.kt
+app/src/main/java/com/cleanforge/data/repository/ScanRepository.kt
+app/src/main/java/com/cleanforge/core/safety/SafetyValidator.kt
+app/src/main/java/com/cleanforge/core/scanner/WhatsAppScanner.kt
+app/src/main/java/com/cleanforge/core/scanner/TelegramScanner.kt
+app/src/main/java/com/cleanforge/core/scanner/InstagramScanner.kt
+app/src/main/java/com/cleanforge/core/scanner/TikTokScanner.kt
+app/src/main/java/com/cleanforge/core/scanner/TwitterXScanner.kt
+```
+
+## Test code
+
+```text
+app/src/test/java/com/cleanforge/core/ClearMemoryUseCaseTest.kt
+```
+
+## Documentation
+
+```text
+docs/PART5_AUDIT_UPDATE.md
+```
+
+---
+
+# Security Audit Summary
+
+## 9.1 Path traversal
+
+Status: **Mitigated**
+
+Controls:
+
+- canonical root enforcement,
+- rejection of relative segments,
+- rejection of `..`,
+- rejection of over-long paths,
+- rejection of control characters,
+- ancestor validation in privileged service.
+
+---
+
+## 9.2 Symlink handling
+
+Status: **Mitigated**
+
+Controls:
+
+- `lstat` everywhere,
+- symlink roots refused,
+- symlink children unlinked as links only,
+- ancestor symlink checks in privileged service.
+
+---
+
+## 9.3 Shell injection
+
+Status: **Not applicable / mitigated by design**
+
+No shell execution was found in the audited filesystem or privileged paths.
+
+No command-line construction from paths was found.
+
+---
+
+## 9.4 Binder and service failure handling
+
+Status: **Strong**
+
+Controls:
+
+- timeouts,
+- transport exception classification,
+- service invalidation,
+- service restart on deadline exceeded,
+- honest unverified deletion reporting.
+
+---
+
+## 9.5 Authorization checks
+
+Status: **Strong by design**
+
+Controls:
+
+- Shizuku state tracking,
+- permission request handling,
+- permanent-denial handling,
+- capability registry,
+- operation gating before deletion.
+
+Device-level verification is still pending.
+
+---
+
+## 9.6 Destructive operation safety
+
+Status: **Strong by design**
+
+Controls:
+
+- scan items are proposals only,
+- confirmed plan type is required,
+- SafetyValidator runs before deletion,
+- SafeDeleter rechecks identity,
+- privileged service restricts deletion shapes,
+- installed-apps guard protects tree deletions,
+- post-deletion verification is used where possible.
+
+---
+
+## 9.7 Secrets and signing material
+
+Status: **No secrets found in reviewed files**
+
+- `keystore.properties` is optional and should remain git-ignored.
+- No credentials were observed in the reviewed Gradle files.
+
+---
+
+## 9.8 Network and telemetry
+
+Status: **Strong**
+
+- No INTERNET permission.
+- No telemetry dependencies observed.
+- No analytics dependencies observed.
+
+---
+
+# Feature Verification Matrix
+
+| Feature | Status | Notes |
+|---|---|---|
+| Shizuku connection | Verified by inspection | Needs device verification |
+| Shizuku authorization states | Verified by inspection | Needs device verification |
+| Capability discovery | Mostly verified | Some scanner metadata corrected |
+| Storage scanning | Verified by inspection | Bounded walker |
+| Directory-size calculation | Verified by inspection | Lower-bound honesty supported |
+| Largest-file analysis | Not fully audited | `LargeFileScanner` review pending |
+| File-type analysis | Not fully audited | Needs scanner review |
+| Application storage statistics | Not fully audited | Depends on backend inventory |
+| Duplicate detection | Mostly verified | Memory bounding needs monitoring |
+| Orphaned-file candidates | Verified by inspection | Strong evidence model |
+| Snapshot creation/comparison | Not verified | Not reviewed yet |
+| RAM measurements | Verified by inspection | Honest model |
+| RAM history | Not verified | UI/storage review pending |
+| Cleanup previews | Not fully verified | Requires PlanBuilder/CleaningEngine review |
+| Cleanup execution | Not fully verified | Requires CleaningEngine review |
+| Deletion verification | Partially verified | Privileged executor strong; engine pending |
+| Cancellation | Mostly verified | Present in walker/hash/privileged executor |
+| Partial failure recovery | Partially verified | Privileged executor strong; engine pending |
+
+---
+
+# String Literal Verification
+
+During Phase 3, a possible issue was identified where string literals appeared to contain trailing spaces, for example:
+
+```kotlin
+"Android "
+"data "
+"cache "
+```
+
+This was investigated on Windows using PowerShell.
+
+Exact literal checks returned no matches for the dangerous path-critical literals.
+
+The broader regex matches were false positives caused by normal spaces between comma-separated strings, for example:
+
+```kotlin
+"dcim", "pictures"
+```
+
+Conclusion:
+
+- The actual source files do not appear to contain the dangerous trailing-space literals.
+- The earlier appearance was an extraction/formatting artifact.
+- This item is considered clean based on the user’s local PowerShell verification.
+
+---
+
+# Verification Commands
+
+The following commands should be run on Windows from the repository root.
+
+## Compile debug code
+
+```powershell
+.\gradlew.bat :app:compileDebugKotlin
+```
+
+## Run unit tests
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+```
+
+## Run only the rewritten RAM test
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest --tests "com.cleanforge.core.ClearMemoryUseCaseTest"
+```
+
+## Run lint without failing by default
+
+```powershell
+.\gradlew.bat :app:lintDebug
+```
+
+## Run strict lint if configured
+
+```powershell
+.\gradlew.bat -PstrictLint :app:lintDebug
+```
+
+These commands have not been executed as part of this audit.
+
+---
+
+# Unresolved Issues and Unsupported Capabilities
+
+The following items remain unresolved or unverified.
+
+## U-01 — Instagram/TikTok/Twitter forensic FILE deletion unsupported
+
+Severity: **High**
+
+Affected files:
+
+```text
+InstagramScanner.kt
+TikTokScanner.kt
+TwitterXScanner.kt
+FileServiceCore.kt
+PathRules.kt
+PrivilegedExecutor.kt
+AppModule.kt
+```
+
+Evidence:
+
+- Scanners emit `DeleteMode.FILE` items under `Android/data/...`.
+- `PathRules.isServiceDeletable` does not allow `DeleteMode.FILE`.
+- Therefore cleanup cannot currently be executed safely.
+
+Reproduction:
+
+1. Wire one of these scanners into DI.
+2. Run a scan.
+3. Attempt cleanup of emitted forensic file items.
+4. Deletion will be refused or unsupported by the privileged service.
+
+Recommended fix:
+
+- Keep scanners unwired for now, or
+- implement scoped privileged `FILE` deletion with strict allowlists, identity checks, and tests.
+
+---
+
+## U-02 — CleaningEngine not audited
+
+Severity: **High**
+
+Affected file:
+
+```text
+app/src/main/java/com/cleanforge/core/cleaning/CleaningEngine.kt
+```
+
+Evidence:
+
+- Cleanup execution has not yet been fully reviewed.
+- Deletion routing, post-verification, and report generation need inspection.
+
+Recommended fix:
+
+- Audit `CleaningEngine.kt` and `PlanBuilder.kt` in Phase 5.
+
+---
+
+## U-03 — PlanBuilder not audited
+
+Severity: **High**
+
+Affected file:
+
+```text
+app/src/main/java/com/cleanforge/core/cleaning/PlanBuilder.kt
+```
+
+Evidence:
+
+- Plan construction, duplicate keeper logic, and revalidation rules have not been fully reviewed.
+
+Recommended fix:
+
+- Audit in Phase 5.
+
+---
+
+## U-04 — UI and ViewModel truthfulness not audited
+
+Severity: **High**
+
+Affected files:
+
+```text
+ui/CleanViewModel.kt
+ui/RamViewModel.kt
+ui/screens/CleanScreen.kt
+ui/screens/RamScreen.kt
+ui/screens/ReviewScreen.kt
+ui/components/*
+```
+
+Evidence:
+
+- UI wiring has not yet been reviewed.
+- Success messages must reflect actual outcomes.
+
+Recommended fix:
+
+- Audit UI layer in Phase 5/6.
+- Ensure failed cleanup does not display reclaimed space.
+- Ensure unverified deletions are labeled unverified.
+
+---
+
+## U-05 — Build and tests not executed
+
+Severity: **Medium**
+
+Affected repository:
+
+```text
+entire project
+```
+
+Evidence:
+
+- No Gradle build or test execution was performed during this audit.
+
+Recommended fix:
+
+- Run the verification commands.
+- Record actual outcomes in a build report.
+
+---
+
+## U-06 — `PackageInventory` not reviewed
+
+Severity: **Medium**
+
+Affected file:
+
+```text
+app/src/main/java/com/cleanforge/core/backend/PackageInventory.kt
+```
+
+Evidence:
+
+- Corpse scanner correctness depends on accurate package inventory behavior.
+- The interface implementation has not been fully reviewed.
+
+Recommended fix:
+
+- Audit `PackageInventory.kt` and `AndroidPackageInventory.kt` in Phase 5.
+
+---
+
+## U-07 — Duplicate scanner memory pressure
+
+Severity: **Medium**
+
+Affected file:
+
+```text
+app/src/main/java/com/cleanforge/core/scanner/DuplicateScanner.kt
+```
+
+Evidence:
+
+- Size-group and hash-group maps may grow large before pruning.
+
+Recommended fix:
+
+- Add explicit caps,
+- prune singleton groups earlier,
+- report truncation if candidate set becomes too large.
+
+---
+
+## U-08 — RAM observer silent failure
+
+Severity: **Low**
+
+Affected file:
+
+```text
+app/src/main/java/com/cleanforge/domain/usecase/ObserveRamUseCase.kt
+```
+
+Evidence:
+
+- If `provider.snapshot()` repeatedly returns null, the flow emits nothing.
+
+Recommended fix:
+
+- Consider exposing an error or unavailable state in UI.
+
+---
+
+## U-09 — Application ID placeholder
+
+Severity: **Low**
+
+Affected file:
+
+```text
+app/build.gradle.kts
+```
+
+Evidence:
+
+```kotlin
+applicationId = "com.cleanforge"
+```
+
+Recommended fix:
+
+- Choose a unique reverse-domain ID before public release.
+
+---
+
+## U-10 — Open-source metadata not fully reviewed
+
+Severity: **Medium**
+
+Missing or unreviewed items may include:
+
+```text
+LICENSE
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+ISSUE_TEMPLATE
+PULL_REQUEST_TEMPLATE
+```
+
+Recommended fix:
+
+- Review license consistency before release.
+- Add contribution guidance if absent.
+- Add issue templates.
+
+---
+
+# Current Release-Readiness Verdict
+
+## Verdict: **NOT READY**
+
+CleanForge has a strong architectural and security foundation, but it is not release-ready yet.
+
+The most important remaining work is:
+
+1. Audit and verify `CleaningEngine`.
+2. Audit and verify `PlanBuilder`.
+3. Audit and verify UI truthfulness.
+4. Execute build and unit tests.
+5. Reconcile documentation with actual capabilities.
+6. Decide the final fate of Instagram/TikTok/Twitter forensic scanners.
+7. Complete open-source metadata review.
+
+Once those are complete, the likely verdict will be either:
+
+```text
+READY WITH KNOWN LIMITATIONS
+```
+
+or
+
+```text
+NOT READY
+```
+
+depending on the results of Phase 5 and Phase 6.
+
+At this moment, the honest verdict is:
+
+```text
+NOT READY — integration and verification still in progress
+```
+
+---
+
+# Next Audit Phase
+
+The next phase should cover:
+
+```text
+Phase 5A — Cleaning Engine, Plan Builder, Backend Models, Capability Registry
+Phase 5B — UI, ViewModels, Navigation, Confirmation Evidence
+Phase 6  — Test Strategy, Documentation, Open-Source Quality
+Phase 7  — Final Regression, Resource Check, Release Verdict
+```
+
+Required files for Phase 5A include:
+
+```text
+core/cleaning/CleaningEngine.kt
+core/cleaning/PlanBuilder.kt
+core/backend/FileOperationBackend.kt
+core/backend/FsResult.kt
+core/backend/StandardFileBackend.kt
+core/backend/PackageInventory.kt
+core/backend/Capabilities.kt
+core/privileged/MaintenanceModel.kt
+core/privileged/CapabilityModel.kt
+core/privileged/CapabilityRegistry.kt
+core/privileged/PrivilegedOperation.kt
+core/privileged/PrivilegedFileApi.kt
+core/shizuku/AidlPrivilegedFileApi.kt
+```
+
+---
+
+# Statement of Audit Integrity
+
+This document does not claim:
+
+- successful builds,
+- passed tests,
+- device verification,
+- completed release validation,
+- universal Android compatibility,
+- or completion of unfinished functionality.
+
+All “verified” statements in this document refer to static inspection only unless explicitly stated otherwise.
+
+No destructive changes were made to user data during this audit.
+
+No test results were invented.
+
+----- file: ./docs/PART_C_AUDIT.md -----
+# CleanForge Part C audit: scanners and RAM
+
+Scope: `scanner/*` (Apk, Cache, Corpse, Duplicate, EmptyDirectory, LargeFile, Log, Temp, Thumbnail, plus the five platform scanners and `ForensicFolderScanner`), `memory/*` (5 files), `ClearMemoryUseCase`, `ObserveRamUseCase`. The Part C zip was byte-identical to the original files already in hand. The platform scanners and `ForensicFolderScanner` were audited earlier; this pass read the rest.
+
+## Bugs found and fixed
+
+| # | Severity | Where | Bug | Fix |
+|---|----------|-------|-----|-----|
+| 1 | High | `WhatsApp/Telegram/TikTok/TwitterX/InstagramScanner` | Did not compile: passed `isPreselected` to the `ScanItem` constructor (it is derived) and used the old nullable backend API; they also swallowed cancellation through `runCatching`. | Rewritten as thin subclasses of `ForensicFolderScanner` (rules and thresholds kept, matching `ForensicScannersTest`). TikTok/Twitter/Instagram documented as dormant (no single-file delete in the Shizuku service). |
+| 2 | Medium | Apk, LargeFile, Duplicate, EmptyDirectory, Log, Temp | A walk cut off at the entry limit, or entries that could not be read, were never reported, so "could not check" looked like "nothing found" (violates `Scanner.incompleteReasons`). | New `WalkNotes`/`walkNoting` collects truncation and unreadable entries; all six scanners now report them. Unreadable log heads and un-listable folders are counted instead of skipped silently. |
+| 3 | Medium | `ThumbnailScanner` | "Only small files, no sub-folders" was claimed even if part of the folder was cut off or unreadable; a missing-vs-denied folder looked the same; no cancellation check. | Fails closed (an unknown part means "not a cache"), reports why, distinguishes missing from denied, checks cancellation. |
+| 4 | Low | `MemInfoParser` | `MemTotal: 0` produced a zero-byte snapshot instead of "unknown". | Returns null. |
+| 5 | Low (compile hazard) | `BackgroundProcessKiller` | `catch (_: Exception)` is not valid on older Kotlin versions. | Named the parameter. |
+| 6 | Low | `ApkScanner` | Parsing each APK (slow) had no cancellation check. | Added. |
+
+## Checked and found sound
+
+- `CacheScanner` / `CorpseScanner`: installed vs known stay separate, tri-state install state, plausibility floor, exact folder type, age, lower-bound sizes.
+- `DuplicateScanner`: staged hashing, hard links excluded, never picks a keeper.
+- `LargeFileScanner`: bounded heap, never pre-selected. `EmptyDirectoryScanner` and `TempScanner` rules match their docs.
+- Memory: `/proc/meminfo` parsing, pressure bands, measured (not estimated) freed bytes, system apps and CleanForge itself are never trimmed.
+
+## Notes (not changed)
+
+- `ClearMemoryResult.processesTouched` counts kill REQUESTS sent, not processes that existed; Android does not let us see others' processes. Word the UI as "asked N apps to trim".
+- `ClearMemoryUseCase` calls `isCurrentlyInstalled` once per known package (hundreds of binder calls); acceptable, but a single installed-apps query would be faster.
+
+## Tests
+
+- Not compiled or run (no Kotlin/Gradle here, `testutil/Fixtures.kt` missing). Checked by reading code against tests and brace/paren balance.
+- Added: `WalkScannerReasonsTest` (4, new), `MemInfoParserTest` (+1). Run `./gradlew testDebugUnitTest`.
+
+----- file: ./docs/ARCHITECTURE_PLAN.md -----
+# CleanForge Architecture Plan (proposal, Part 1)
+
+Status: proposal only. Nothing here has been implemented, compiled or tested. Finding IDs (F-xx) and experiment IDs (E-xx) refer to `docs/CAPABILITY_AUDIT.md`.
+
+## 1. Principles
+
+1. **Additive, not a rewrite.** The deletion core, safety policy and confirmation gate are the best part of the repo. They stay as they are (list in audit section 5).
+2. **Say only what was proven.** Every capability shown to the user comes from a probe or an operation result, never from an inference such as "the binder is alive".
+3. **Shizuku stays the privileged channel and stays narrow.** The privileged process exposes a small, fixed AIDL surface. It never receives a command line. Policy is enforced on both sides of the binder.
+4. **Read-only features must not weaken destructive invariants.** New analyzers reuse `FsOps`/`StorageWalker` but cannot reach `SafeDeleter` or `CleaningEngine` except through `ConfirmedPlan`.
+5. **Bounded and cheap on a low-end phone.** One traversal, aggregates instead of per-file rows, hashing only on demand.
+6. **Keep a single Gradle module** until a second module has a concrete reason (for example a separate service APK). Package boundaries are enough today.
+
+## 2. Target shape (additions marked NEW)
+
+```
+ui/                      screens, dialogs               (Clean, Review, About; NEW: Analyze, Diagnostics)
+domain/usecase/          Scan, Execute                  (NEW: Probe, BuildInventory, CompareSnapshots)
+data/repository/         ScanRepository                 (NEW: InventoryRepository, SnapshotStore)
+core/
+  capability/   NEW      CapabilityProbe, CapabilityReport
+  backend/               FileOperationBackend           (CHANGED: typed results, section 4)
+                         PackageInventory, Capabilities
+  fs/                    FsOps, SafeDeleter, PathRules, StorageWalker   (unchanged core)
+  inventory/    NEW      StorageIndexer, DirNode, TypeClassifier
+  scanner/               existing scanners              (CHANGED: consume inventory + typed results)
+  safety/, cleaning/     SafetyValidator, PlanBuilder, CleaningEngine   (message and journal changes only)
+  shizuku/               Manager, Connector, Service    (CHANGED: probe hook, new read-only AIDL methods)
+  diagnostics/  NEW      MemoryDiagnostics (read-only), DiagnosticsReport
+  journal/      NEW      DeletionJournal
+```
+
+## 3. Capability model (fixes F-03)
+
+`CapabilityProbe` runs read-only checks and returns a `CapabilityReport`. Each capability has a tri-state and a human reason.
+
+| Capability | Check | States |
+| --- | --- | --- |
+| All-files access | `Environment.isExternalStorageManager()` | Granted / Missing |
+| Shizuku binder | `pingBinder`, `isPreV11` | Running / NotRunning / NotInstalled / TooOld |
+| Shizuku permission | `checkSelfPermission`, plus `shouldShowRequestPermissionRationale` | Granted / Denied / DeniedPermanently |
+| Service bind | bind, `uid()`, round-trip under the timeout | Verified (uid 2000 or 0) / Failed(reason) |
+| Android/data readable | service `list(Android/data)` returns non-null | Verified / Unavailable / Unknown |
+| Usage access (optional) | `AppOpsManager` check, only if per-app stats are built | Granted / Missing |
+
+Rules: the report carries a timestamp; the UI shows "Verified at hh:mm" or "Not verified"; `ShizukuCard` text is derived from the report, not from `ShizukuState` alone; the probe runs on resume and before every scan and every delete (cheap calls only). Export the report in diagnostics.
+
+## 4. Typed results at the backend boundary (fixes F-02, F-13)
+
+Replace "null means everything" with a result type, keeping `FsOps` unchanged:
+
+```
+sealed interface FsResult<out T> {
+    data class Ok<T>(val value: T) : FsResult<T>
+    data object NotFound : FsResult<Nothing>
+    data class Denied(val why: String) : FsResult<Nothing>
+    data class Unavailable(val why: String) : FsResult<Nothing>   // service dead, bind timeout, not authorized
+    data class Failed(val why: String) : FsResult<Nothing>
+}
+```
+
+- `ShizukuFileBackend.call` maps: no service -> `Unavailable`; `RemoteException` -> `Unavailable` and invalidate; service returned null -> `Denied` or `NotFound` (add a status code to the AIDL reply, see section 7).
+- Scanners must turn `Unavailable`/`Denied` into `ScanProgress.ScannerFailed` or an `incomplete` flag, never an empty list.
+- `CleaningEngine` reports `Unavailable` as FAILED ("Shizuku service unreachable"), not SKIPPED "Already gone", and verification treats `Unavailable` as "not verified", not as "gone".
+- `ScanItem` gains `sizeComplete: Boolean` and `unreadableCount: Int`; the UI prefixes "at least" when incomplete (fixes F-06).
+
+## 5. Inventory and analyzers (requirements 2 to 4, 8; fixes F-09)
+
+**Single pass.** `StorageIndexer` walks the allowed roots once with the existing `StorageWalker` limits and produces:
+
+- `DirNode(path, bytes, fileCount, newestMtime, complete, unreadable)` for directories down to a configurable depth, aggregated bottom-up while streaming (never holds all files in memory);
+- top-K heaps for largest files and largest directories;
+- per-category byte totals via `TypeClassifier` (extension first; magic-byte sniffing only for ambiguous or unknown extensions; no MIME database dependency required);
+- a candidate list of regular files in the size-groups the duplicate scanner needs (size and fingerprint only, no hashing).
+
+Existing scanners become consumers of this view. They keep their evidence rules. Heavy work (hashing) stays on demand.
+
+**Roots.** Root list becomes data, not a constant: default is the six current roots plus an optional "whole shared storage" mode that still excludes `Android/` (separate path through the service) and still respects `PathRules`. Whether `Android/media` is readable-only or deletable is decision D-3.
+
+**Android/data.** To avoid one binder call per entry, add read-only service methods (section 7) that return compact aggregates, for example `childSizes(path)` returning `[name, bytes, newestMtime, complete]` per child, paged to stay far under the binder limit.
+
+**Snapshots (req. 8).** Persist aggregates, not per-file rows: root totals, `DirNode`s to depth N, top-K lists, category totals, scan timestamp and the capability report. Growth analysis is a diff of two snapshots by directory path. Retention: last N snapshots or 90 days. Storage engine is decision D-1. The same store holds "first seen as orphan" timestamps, which F-05 needs.
+
+## 6. Memory diagnostics (requirement 9, read-only)
+
+Rule: this module reads, it never "boosts", kills or clears anything, and the README stance (no boost claims) stays.
+
+Candidate signals. **All are UNVERIFIED; do not build before experiment E-10 confirms each on the target device and Android versions.**
+
+| Signal | Candidate source | Process needed | Status |
+| --- | --- | --- | --- |
+| Total/available RAM, low-memory threshold | `ActivityManager.getMemoryInfo` | app | expected to work; verify |
+| Detailed kernel memory counters, swap totals | `/proc/meminfo` | app | commonly readable; verify per version |
+| Own process memory | `Debug.MemoryInfo` | app | expected to work |
+| Memory pressure | PSI files under `/proc/pressure/` | app or shell | kernel and SELinux dependent; unknown |
+| zRAM size and use | `/proc/swaps`, `/sys/block/zram*/` | probably shell | unknown |
+| Per-process memory of other apps | not available to ordinary apps (`/proc/<pid>` of other UIDs is hidden); shell-level tools exist | Shizuku | BLOCKED for the app process; unknown via Shizuku |
+
+Design: `MemorySource` interface per signal with `Available / Unavailable(reason)` results (same typed approach as section 4), so the UI can show "not available on this device" instead of zeros. For anything needing the shell UID, add **fixed-purpose** service methods that read an allow-listed file by id (for example `readSystemFile(ID)`), never an arbitrary path. If the only way to get a signal is to run a tool such as `dumpsys`, that is a deliberate exception to the "no shell" invariant and is decision D-4; do not add it silently.
+
+## 7. Privileged service evolution
+
+- **Keep** `IFileService` method ids 1 to 5 and `destroy() = 16777114` unchanged. **Append** new methods with new ids. Add `int apiVersion()` so the app can detect an older running service (the connector already passes `version(BuildConfig.VERSION_CODE)`; verify in E-08 how a version change restarts the process).
+- Every method re-validates its arguments (as today). Add a status code to replies so the app can tell "missing" from "refused" (F-02).
+- New read-only candidates: `childSizes(path)`, `readSystemFile(id)`. New destructive methods: none planned.
+- Optional defence in depth (F-07): per-session deny-list (installed package set plus own package) pushed by the app and enforced by the service for `TREE`. Label it as protection against app bugs, not a trust boundary.
+- No arbitrary-path methods, no command strings, no `Shizuku.newProcess`. `PolicyGuardTest` keeps enforcing this; any exception from D-4 is added to its allow-list explicitly.
+- Add a thin interface over the AIDL stub so tests can inject a fake (F-08).
+
+## 8. Interruption safety (fixes F-04, F-13)
+
+- `DeletionJournal`: before each item is deleted, append `{plan id, path, mode, fingerprint}`; after, append the outcome. On next start, if a plan has no completion record, show "Last cleanup was interrupted" with the per-item state. Small append-only file in app storage.
+- Run-to-completion: D-2 chooses between (a) foreground service (adds `FOREGROUND_SERVICE` and a type permission, breaking the "exactly two permissions" guard, which would then be updated deliberately) and (b) keep running in-process plus the journal and a warning when the app goes to the background.
+- Cancellation: check `ensureActive` inside `SafeDeleter.purge` through a cancel callback, so one large folder can be stopped between entries. Do not change deletion order or identity checks.
+- Credit `bytesFreed` for PARTIAL and LIMIT_EXCEEDED; report logical size and say so.
+
+## 9. Decisions for the owner
+
+| ID | Question | My suggestion |
+| --- | --- | --- |
+| D-1 | Snapshot store: Room, framework SQLite, or flat files | Room if you accept the dependency (KSP is already in the build); otherwise flat JSON per snapshot. Both stay small because only aggregates are stored. |
+| D-2 | Long cleanups: foreground service or in-process plus journal | In-process plus journal first (no new permissions); revisit if E-03 shows real interruptions. |
+| D-3 | Should user-ticked single files under `Android/media` be deletable, and should it be scanned read-only | Read-only analysis first; deletion stays blocked until E-06 and a policy review. |
+| D-4 | May the privileged service ever run a fixed tool (for example `dumpsys`) for diagnostics | Prefer file reads. If a tool is unavoidable, one fixed argv, no inputs, listed explicitly in `PolicyGuardTest`. |
+| D-5 | "Unusable without Shizuku" vs the current optional design | Keep optional: seven scanners work without it, and the capability report makes the difference visible. If you want Shizuku-required, say so; it is a UI gate, not a code rewrite. |
+| D-6 | License, applicationId, security contact | Decide before the first public release (cannot be changed later without breaking updates). |
+
+## 10. Explicitly not planned
+
+- Rewriting `SafeDeleter`, `SafetyValidator` or the plan/confirm types.
+- Hidden or undocumented Android APIs (the repo already removed them once).
+- Claiming access to `/data/data`, other apps' private files, or other apps' processes. Android and Shizuku do not grant that to a shell-UID helper in general; whatever can be read must be proven per device (E-01, E-10).
+- Splitting into multiple Gradle modules before there is a need.
+- Any network permission, analytics or crash reporter (`PolicyGuardTest` stays).
+
+----- file: ./docs/IMPLEMENTATION_ROADMAP.md -----
+# CleanForge Implementation Roadmap (proposal, Part 1)
+
+Nothing below is authorized or started. Part 2 begins only when the owner says so. Sizes: S (under a day), M (a few days), L (a week or more). F-xx and E-xx refer to `docs/CAPABILITY_AUDIT.md`; D-x to `docs/ARCHITECTURE_PLAN.md`.
+
+Ordering rule: first make the project provable, then make its status honest, then protect against interruption, then add features on a shared foundation.
+
+## Phase 0. Make it provable (P0 gate)
+
+| # | Task | Size | Exit criterion |
+| --- | --- | --- | --- |
+| 0.1 | Run `./gradlew clean :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease` in CI or locally; fix compile errors only | M | CI green; test failures triaged one by one (each encodes a safety rule, so fix the code unless the test is wrong) |
+| 0.2 | Repo hygiene (F-15): set exec bit on `gradlew` (`git update-index --chmod=+x`), remove the duplicate scripts under `gradle/wrapper/`, update `BUILD.md`/README/CI comments about the wrapper, drop the stray `#Aman` line, add `permissions: contents: read` and SHA-pin actions, optionally add `distributionSha256Sum` | S | Fresh clone builds with `./gradlew` on Linux |
+| 0.3 | Device smoke test: E-01, E-02, E-04 on the Android 11 target, then one Android 14/15 device | M | Written results appended to the audit; any contradiction with the docs is fixed in the docs first |
+| 0.4 | Owner decisions D-6: LICENSE, applicationId, security contact | S | `LICENSE` committed; id final before any public APK |
+
+Do not distribute an APK or tell anyone to use it on real data before 0.1 and 0.3 are done.
+
+## Phase 1. Truthful status (P1)
+
+| # | Task | Fixes | Size | Depends on |
+| --- | --- | --- | --- | --- |
+| 1.1 | `FsResult` type at `FileOperationBackend`; map Shizuku failures; AIDL status codes (append-only) | F-02 | M | 0.1 |
+| 1.2 | Scanners report Unavailable/Denied as failed or incomplete; Clean tab distinguishes "scan finished, nothing found" from "could not scan" | F-02 | S | 1.1 |
+| 1.3 | `CapabilityProbe` + `CapabilityReport`; `ShizukuCard` text from the report; permanent-denial guidance | F-03 | M | 1.1 |
+| 1.4 | Carry `complete` and unreadable counts into `ScanItem`; "at least" labels | F-06 | S | 1.1 |
+| 1.5 | Engine messages: unreachable service is FAILED not "Already gone"; verification treats Unavailable as not verified | F-02, F-13 | S | 1.1 |
+| 1.6 | Interface over the AIDL stub; tests for disconnect, timeout, null, oversize list, rebind; `ScanRepository` tests | F-08, F-14 | M | 1.1 |
+| 1.7 | Interim fix for the orphan gate: reword the reason to what mtime really measures; make the default stricter; leave the real fix for 4.3 | F-05 | S | E-09 result |
+
+Exit: with a fake service in every failure mode, the UI never shows an empty result for a failed scan.
+
+## Phase 2. Interruption safety (P1)
+
+| # | Task | Fixes | Size | Depends on |
+| --- | --- | --- | --- | --- |
+| 2.1 | `DeletionJournal` and "last cleanup was interrupted" screen | F-04 | M | 0.1 |
+| 2.2 | Cancellation inside `SafeDeleter.purge` through a callback | F-13 | S | none |
+| 2.3 | Credit freed bytes for PARTIAL/LIMIT_EXCEEDED; keep partial report when the flow throws; call `forget` for what was deleted | F-13, F-04 | S | none |
+| 2.4 | Decide D-2; if foreground service is chosen, add it with its permission and update `PolicyGuardTest` on purpose | F-04 | M | E-03 |
+| 2.5 | Optional service-side deny-list for `TREE` (D-note in plan section 7) | F-07 | S | 1.1 |
+
+Exit: E-03 repeated; the report after a kill is accurate.
+
+## Phase 3. Inventory foundation (P2)
+
+| # | Task | Serves | Size | Depends on |
+| --- | --- | --- | --- | --- |
+| 3.1 | Measure first: scan time and I/O on the low-end device (E-11) | req. 10 | S | 0.3 |
+| 3.2 | `StorageIndexer`: one bounded pass, `DirNode` aggregates, top-K files and directories | req. 2, 3 | L | 1.1 |
+| 3.3 | `TypeClassifier` and category breakdown | req. 4 | M | 3.2 |
+| 3.4 | Move Temp, APK, Log, Large, Duplicate, EmptyDir scanners onto the inventory without changing their evidence rules | F-09 | M | 3.2 |
+| 3.5 | Analyze screen: directory-size tree, largest directories, type breakdown (read-only) | req. 2, 3, 4 | M | 3.2, 3.3 |
+| 3.6 | Root list as data; decide D-3 for `Android/media` (read-only first) | F-10 | S | 3.2 |
+| 3.7 | Service `childSizes(path)` for `Android/data` aggregates | req. 2, 5 | M | 1.1 |
+
+Exit: a full scan visits each directory once; results match the old scanners on a fixture tree.
+
+## Phase 4. Persistence and growth (P2)
+
+| # | Task | Serves | Size | Depends on |
+| --- | --- | --- | --- | --- |
+| 4.1 | Decide D-1; snapshot store for aggregates only; retention rule | req. 8 | M | 3.2 |
+| 4.2 | Snapshot diff and growth view (by directory, by category) | req. 8 | M | 4.1 |
+| 4.3 | "First seen as orphan" timestamps; orphan gate becomes "at least N days since first seen" | F-05 | S | 4.1 |
+| 4.4 | Migration tests; store size cap | req. 8, 10 | S | 4.1 |
+
+## Phase 5. App storage and orphans (P2)
+
+| # | Task | Serves | Size | Depends on |
+| --- | --- | --- | --- | --- |
+| 5.1 | Optional Usage-access flow and per-app size screen using the platform storage-stats API, shown as "not available" until granted; verify per-user handling (the removed code used the wrong user handle) | req. 5 | M | 1.3 |
+| 5.2 | Per-app external data sizes via the service (`Android/data`, `Android/obb`), clearly labelled as external only | req. 5 | M | 3.7 |
+| 5.3 | Orphan candidates outside `Android/` (for example empty or tiny top-level folders with no matching installed package name), evidence-based and review-only | req. 7 | M | 3.2 |
+| 5.4 | Pre-selection policy for caches (F-11) after E-02 findings | F-11 | S | E-02 |
+
+## Phase 6. Memory diagnostics (P2)
+
+| # | Task | Serves | Size | Depends on |
+| --- | --- | --- | --- | --- |
+| 6.1 | Experiment E-10 on each target Android version; record which signals exist | req. 9 | M | 0.3 |
+| 6.2 | `MemorySource` interface with Available/Unavailable results; app-process sources first | req. 9 | M | 1.1, 6.1 |
+| 6.3 | Privileged read-only sources through allow-listed ids; decide D-4 first | req. 9 | M | 6.1, D-4 |
+| 6.4 | Diagnostics screen: totals, pressure, swap/zRAM where available, honest "not available" otherwise; no boost, kill or clear actions | req. 9, 12 | M | 6.2 |
+
+## Phase 7. Refinements (P3)
+
+Exportable diagnostics report with path redaction; accessibility pass (content descriptions, TalkBack, font scale); localization scaffolding; dependency updates (AGP, Kotlin, Compose BOM) with a fresh test run; dependency verification metadata; Compose UI test for the confirmation dialog; service lifecycle cleanup (`unbind`, `unregister` callers, `pending` completion on disconnect, E-07/E-08 outcomes); `st_mtim` precision on API 31+ (F-12).
+
+## Recommended order, in one line
+
+0.1 -> 0.2 -> 0.3 -> 1.1 -> (1.2, 1.4, 1.5 in parallel) -> 1.3 -> 1.6 -> 2.1 -> 2.2/2.3 -> 3.1 -> 3.2 -> 3.4 -> 3.3/3.5 -> 4.x -> 5.x -> 6.x -> 7.
+
+## Gates
+
+- No phase starts before the previous phase's exit criterion is met, except phase 6.1 (experiments) which can run any time after 0.3.
+- Every change that touches deletion, path policy or the confirmation flow ships with a regression test first.
+- Every new capability appears in the UI only as a probed state, never as an assumption.
+
+----- file: ./docs/partA.patch -----
+diff -ruN orig/core-main/backend/StandardFileBackend.kt src/core-main/backend/StandardFileBackend.kt
+--- orig/core-main/backend/StandardFileBackend.kt	2026-10-13 20:42:24.803140564 +0000
++++ src/core-main/backend/StandardFileBackend.kt	2026-10-14 07:55:39.500424944 +0000
+@@ -10,6 +10,8 @@
+ import com.cleanforge.core.fs.SizeResult
+ import com.cleanforge.core.fs.StorageWalker
+ import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.currentCoroutineContext
+ import kotlinx.coroutines.withContext
+ 
+ /** Runs in the app process. Reaches shared storage with All-files access; NOT Android/data or Android/obb. */
+@@ -17,7 +19,6 @@
+     override val name: String = "App (All-files access)"
+ 
+     private val walker = StorageWalker(fs)
+-    private val deleter = SafeDeleter(fs)
+ 
+     override suspend fun lstat(path: String): FsResult<FsStat> = withContext(Dispatchers.IO) {
+         when (val p = fs.probe(path)) {
+@@ -57,5 +58,9 @@
+     }
+ 
+     override suspend fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult =
+-        withContext(Dispatchers.IO) { deleter.delete(path, mode, expected) }
++        withContext(Dispatchers.IO) {
++            // Cancelling the caller stops a big folder between entries instead of after the whole thing.
++            val job = currentCoroutineContext()[Job]
++            SafeDeleter(fs, isCancelled = { job?.isActive == false }).delete(path, mode, expected)
++        }
+ }
+diff -ruN orig/core-main/cleaning/CleaningEngine.kt src/core-main/cleaning/CleaningEngine.kt
+--- orig/core-main/cleaning/CleaningEngine.kt	2026-10-13 20:42:24.804277199 +0000
++++ src/core-main/cleaning/CleaningEngine.kt	2026-10-14 07:55:49.222584756 +0000
+@@ -14,7 +14,9 @@
+ import com.cleanforge.core.model.ScanItem
+ import com.cleanforge.core.privileged.FailureKind
+ import com.cleanforge.core.privileged.MaintenanceResult
++import com.cleanforge.core.privileged.OperationCapability
+ import com.cleanforge.core.privileged.PrivilegedExecutor
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import com.cleanforge.core.privileged.classifyDeletion
+ import com.cleanforge.core.privileged.observePostState
+ import com.cleanforge.core.privileged.toMaintenanceRequest
+@@ -63,7 +65,18 @@
+     private val capabilities: Capabilities
+ ) {
+ 
++    /**
++     * What ONE run has already established, so a plan of hundreds of items does not repeat the two expensive questions
++     * (the full package list, the Shizuku capability probe) for every item. A new run starts empty: nothing is reused
++     * across runs. The cheap, per-package install state and the Shizuku authorization are still asked for every item.
++     */
++    private class RunCache {
++        var knownPackages: Set<String>? = null
++        val ready = HashMap<PrivilegedOperation, OperationCapability>()
++    }
++
+     fun execute(confirmed: ConfirmedPlan): Flow<CleaningProgress> = flow {
++        val cache = RunCache()
+         val items = confirmed.plan.items
+         val outcomes = ArrayList<ItemOutcome>(items.size)
+         var freed = 0L
+@@ -71,7 +84,14 @@
+         for ((index, item) in items.withIndex()) {
+             currentCoroutineContext().ensureActive()
+             emit(CleaningProgress.ItemStarted(index + 1, items.size, item))
+-            val outcome = processItem(item)
++            val outcome = try {
++                processItem(item, cache)
++            } catch (ce: CancellationException) {
++                throw ce
++            } catch (t: Throwable) {
++                // A failing capability/inventory call must cost ONE item, not the whole run and its report.
++                failed(item, t.message ?: "Cleanup failed unexpectedly")
++            }
+             outcomes += outcome
+             freed += outcome.bytesFreed
+             emit(CleaningProgress.Progress(index + 1, items.size, freed, item.displayName, outcome))
+@@ -79,7 +99,7 @@
+         emit(CleaningProgress.Completed(CleaningReport(outcomes)))
+     }.flowOn(Dispatchers.IO)
+ 
+-    private suspend fun processItem(item: ScanItem): ItemOutcome {
++    private suspend fun processItem(item: ScanItem, cache: RunCache): ItemOutcome {
+         // ---- REVALIDATE ----
+         val refusal = safety.rejectionReason(item)
+         if (refusal != null) return skipped(item, "Safety check failed: $refusal")
+@@ -94,10 +114,11 @@
+         var known: Set<String> = emptySet()
+         if (item.category == CleaningCategory.CORPSE_LEFTOVER || item.category == CleaningCategory.APP_CACHE) {
+             val pkg = item.owningPackage ?: return skipped(item, "No package recorded for this folder")
+-            val snapshot = inventory.knownPackageNames()
++            val snapshot = cache.knownPackages ?: inventory.knownPackageNames()
+             if (snapshot == null || snapshot.size < MIN_PLAUSIBLE_PACKAGES) {
+                 return skipped(item, "Could not verify which apps are installed")
+             }
++            cache.knownPackages = snapshot
+             known = snapshot
+             // Two different questions: "known" includes data-kept uninstalls, "installed" does not. A failed query is
+             // UNKNOWN and is never read as "not installed" (that would be the unsafe answer for a leftover).
+@@ -113,17 +134,18 @@
+             }
+         }
+ 
+-        return if (item.requiresShizuku) processPrivileged(item, known) else processStandard(item)
++        return if (item.requiresShizuku) processPrivileged(item, known, cache) else processStandard(item)
+     }
+ 
+     // ---------------------------------------------------------------- privileged path
+ 
+-    private suspend fun processPrivileged(item: ScanItem, known: Set<String>): ItemOutcome {
++    private suspend fun processPrivileged(item: ScanItem, known: Set<String>, cache: RunCache): ItemOutcome {
+         val expected = item.fingerprint ?: return skipped(item, "No scan snapshot for this item; scan again")
+         val request = item.toMaintenanceRequest(known)
+             ?: return skipped(item, "This item is not a kind of cleanup the Shizuku service supports, so it was left alone")
+ 
+-        val readiness = capabilities.readiness(request.operation)
++        val readiness = cache.ready[request.operation]
++            ?: capabilities.readiness(request.operation).also { if (it.canAttempt) cache.ready[request.operation] = it }
+         if (!readiness.canAttempt) return skipped(item, "Not available right now: ${readiness.reason}")
+ 
+         when (val now = privileged.stat(item.path)) {
+diff -ruN orig/core-main/cleaning/PlanBuilder.kt src/core-main/cleaning/PlanBuilder.kt
+--- orig/core-main/cleaning/PlanBuilder.kt	2026-10-13 20:42:24.804488929 +0000
++++ src/core-main/cleaning/PlanBuilder.kt	2026-10-13 20:42:44.170054853 +0000
+@@ -47,6 +47,7 @@
+         // Everything that is a candidate counts as "going away", even if it is refused further down: that can
+         // only make the rule stricter, never looser.
+         val deleting = afterOverlap.mapTo(HashSet<String>()) { it.path }
++        fun insideCleanedFolder(path: String) = folderRoots.any { path.startsWith("$it/") }
+         val copiesByGroup: Map<String, List<ScanItem>> = scanned
+             .filter { it.category == CleaningCategory.DUPLICATE && it.groupId != null }
+             .groupBy { it.groupId ?: "" }
+@@ -58,12 +59,14 @@
+                 continue
+             }
+             val copies = item.groupId?.let { copiesByGroup[it] }.orEmpty()
+-            val survivor = copies.firstOrNull { it.path != item.path && it.path !in deleting && it.fingerprint != null }
++            val others = copies.filter { it.path != item.path && it.path !in deleting && it.fingerprint != null }
++            // A copy inside a folder that is being emptied in the same run is not a keeper: it goes away too.
++            val survivor = others.firstOrNull { !insideCleanedFolder(it.path) }
+             if (survivor == null) {
+-                val why = if (copies.size < 2) {
+-                    "The other copies of this file are unknown; scan again"
+-                } else {
+-                    "Every copy of this file is selected; at least one must stay"
++                val why = when {
++                    copies.size < 2 -> "The other copies of this file are unknown; scan again"
++                    others.isNotEmpty() -> "The only other copy lies in a folder that is also being cleaned; at least one must stay"
++                    else -> "Every copy of this file is selected; at least one must stay"
+                 }
+                 rejected += RejectedItem(item, why)
+                 continue
+@@ -76,7 +79,10 @@
+         val plannedPaths = planned.mapTo(HashSet<String>()) { it.path }
+         val wholeGroupPaths = HashSet<String>()
+         for (copies in copiesByGroup.values) {
+-            if (copies.all { it.path in plannedPaths }) copies.mapTo(wholeGroupPaths) { it.path }
++            // "Going away" also covers a copy that lies inside a folder emptied in the same run.
++            if (copies.all { it.path in plannedPaths || insideCleanedFolder(it.path) }) {
++                copies.mapTo(wholeGroupPaths) { it.path }
++            }
+         }
+         val finalItems = ArrayList<ScanItem>()
+         for (item in planned) {
+diff -ruN orig/core-main/fs/SafeDeleter.kt src/core-main/fs/SafeDeleter.kt
+--- orig/core-main/fs/SafeDeleter.kt	2026-10-13 20:42:24.802935617 +0000
++++ src/core-main/fs/SafeDeleter.kt	2026-10-13 20:42:24.987886897 +0000
+@@ -26,7 +26,12 @@
+      [DeleteStatus.CANCELLED] (or [DeleteStatus.PARTIAL]-like counts in the result). Never interrupts a single
+      remove() call, and never changes deletion order or identity checks.
+      */
+-    private val isCancelled: () -> Boolean = { false }
++    private val isCancelled: () -> Boolean = { false },
++    /**
++     * The system-owned storage root. Only folders BELOW it are inspected as ancestors of the target; the system's own
++     * directories above it are not ours to judge (see [ancestorsAreSafe]).
++     */
++    private val trustedRoot: String = PathRules.ROOT
+ ) {
+     fun delete(path: String, mode: DeleteMode, expected: FsStat?): DeleteResult {
+         // 1. Initial check on the target itself
+@@ -40,10 +45,10 @@
+             return DeleteResult(DeleteStatus.IDENTITY_CHANGED, detail = "Object changed since it was scanned")
+         }
+ 
+-        // 2. NEW: Validate ALL ancestors immediately after confirming target existence
++        // 2. Every folder between the storage root and the target must still be a real directory (not a link).
+         // This closes the TOCTOU gap between FileServiceCore's check and this execution.
+-        if (!validateAncestors(path, st.dev)) {
+-             return DeleteResult(DeleteStatus.REFUSED, detail = "One or more parent directories are unsafe (symlink/non-dir)")
++        if (!ancestorsAreSafe(path)) {
++            return DeleteResult(DeleteStatus.REFUSED, detail = "One or more parent directories are unsafe (symlink/non-dir)")
+         }
+ 
+         return when (mode) {
+@@ -55,26 +60,27 @@
+     }
+ 
+     /**
+-     * Verifies that every component of [path] below the storage root is a real directory 
+-     * and belongs to the same device ([rootDev]).
+-     * Returns true if safe, false if any ancestor is a symlink, file, or different mount.
++     * Every folder between [trustedRoot] and [path] must be a real directory, never a symlink or a file.
++     *
++     * Only the part BELOW [trustedRoot] is inspected. The directories above it belong to the system: on Android
++     * "/storage" is a tmpfs, a different device than the shared-storage mount, so comparing device numbers up there
++     * made every real deletion come back REFUSED. Device numbers of ancestors are deliberately not compared at all:
++     * a mount point among the ancestors cannot redirect the deletion, and mounts INSIDE the tree are handled in
++     * [purge]. A path that is not under [trustedRoot] (only tests; the validators confine production paths to
++     * PathRules.ROOT) has all of its ancestors inspected.
+      */
+-    private fun validateAncestors(path: String, rootDev: Long): Boolean {
++    private fun ancestorsAreSafe(path: String): Boolean {
+         val parts = path.split('/').filter { it.isNotEmpty() }
+-        if (parts.isEmpty()) return true // Root? Shouldn't happen in CleanForge context but safe fallback.
+-        
+-        var current = "/"
+-        // Iterate through all parents (exclude the last part which is the target itself, already checked)
+-        for (i in 0 until parts.size - 1) {
+-            val name = parts[i]
+-            current = if (current.endsWith("/")) "$current$name" else "$current/$name"
+-            
+-            val stat = fs.lstat(current) ?: return false // Missing parent is fatal
+-            if (stat.type != FsType.DIRECTORY) return false // Parent is not a dir (file/symlink)
+-            if (stat.dev != rootDev) return false // Cross-device mount detected
+-            
+-            // Optional: Check if it's a symlink explicitly? lstat returns SYMLINK type if it is one.
+-            // So 'stat.type != DIRECTORY' covers symlinks pointing to dirs/files.
++        if (parts.size < 2) return true
++        val rootParts = trustedRoot.split('/').filter { it.isNotEmpty() }
++        val underRoot = parts.size > rootParts.size && parts.subList(0, rootParts.size) == rootParts
++        val firstInspected = if (underRoot) rootParts.size else 0
++        var current = ""
++        for (i in 0 until parts.size - 1) { // the last part is the target itself, already inspected
++            current += "/" + parts[i]
++            if (i < firstInspected) continue
++            val stat = fs.lstat(current) ?: return false // a missing parent is fatal
++            if (stat.type != FsType.DIRECTORY) return false // lstat reports a link as SYMLINK, so links land here
+         }
+         return true
+     }
+diff -ruN orig/core-main/fs/StorageWalker.kt src/core-main/fs/StorageWalker.kt
+--- orig/core-main/fs/StorageWalker.kt	2026-10-13 20:42:24.802906645 +0000
++++ src/core-main/fs/StorageWalker.kt	2026-10-13 20:42:24.988869840 +0000
+@@ -15,7 +15,7 @@
+         limits: WalkLimits = WalkLimits(),
+         skipDir: (String) -> Boolean = { false },
+         onTruncated: () -> Unit = {},
+-        /** Called once per directory that exists but could not be listed (its contents are NOT part of the walk). */
++        /** Called once per entry that exists but could not be examined or listed, or that is a mount point (its contents are NOT part of the walk). */
+         onUnreadable: () -> Unit = {}
+     ): Sequence<Entry> = sequence {
+         val rootStat = fs.lstat(root)
+@@ -40,8 +40,18 @@
+                     return@sequence
+                 }
+                 val path = "$dir/$name"
+-                val st = fs.lstat(path) ?: continue
+-                if (st.dev != rootStat.dev) continue // mount boundary
++                val st = when (val probe = fs.probe(path)) {
++                    is FsProbe.Found -> probe.stat
++                    FsProbe.Missing -> continue // vanished between list and stat: nothing to count
++                    FsProbe.Denied, FsProbe.Error -> {
++                        onUnreadable() // it exists but cannot be examined: its bytes are unknown, never "zero"
++                        continue
++                    }
++                }
++                if (st.dev != rootStat.dev) { // mount boundary: not entered, so whatever is below it is not counted
++                    onUnreadable()
++                    continue
++                }
+                 yield(Entry(path, name, st, depth + 1))
+                 if (st.type == FsType.DIRECTORY && !skipDir(path)) {
+                     if (depth + 1 < limits.maxDepth) {
+diff -ruN orig/core-main/safety/SafetyValidator.kt src/core-main/safety/SafetyValidator.kt
+--- orig/core-main/safety/SafetyValidator.kt	2026-10-13 20:42:24.803457187 +0000
++++ src/core-main/safety/SafetyValidator.kt	2026-10-13 20:42:35.655591205 +0000
+@@ -64,6 +64,7 @@
+             CleaningCategory.FORENSIC_MEDIA -> {
+                 if (!isKnownForensicPath(c)) refuse("Not a known app-specific forensic media path")
+                 if (item.owningPackage == null) refuse("Forensic media items must declare their owning package")
++                if (item.owningPackage != c[2]) refuse("Owning package does not match the folder")
+             }
+             else -> Unit
+         }
+@@ -114,7 +115,7 @@
+         if (!c[0].equals("Android", ignoreCase = true)) return false
+ 
+         val area = c[1]
+-        val pkg = c[2].lowercase()
++        val pkg = c[2] // exact match: the folder name must be the package's real name
+         val tail = c.drop(3)
+         val lowerTail = tail.map { it.lowercase() }
+ 
+diff -ruN orig/core-main/scanner/InstagramScanner.kt src/core-main/scanner/InstagramScanner.kt
+--- orig/core-main/scanner/InstagramScanner.kt	2026-10-13 20:42:24.804843870 +0000
++++ src/core-main/scanner/InstagramScanner.kt	2026-10-14 02:44:19.711517337 +0000
+@@ -1,92 +1,41 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.privileged.PrivilegedOperation
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * Instagram media cache under Android/data, files older than 14 days.
++ *
++ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
++ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
++ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
++ */
+ class InstagramScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "instagram_forensics"
+     override val displayName = "Instagram Forensics"
+     override val requirement = Requirement.SHIZUKU
+-	override val privilegedOperations = setOf(
+-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+-)
++    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.instagram.android"
+-    private val pkgLite = "com.instagram.lite"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val activePkg = when {
+-            inventory.isCurrentlyInstalled(pkg) -> pkg
+-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
+-            else -> return@flow
+-        }
+-
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(14)
+-        val batch = mutableListOf<ScanItem>()
++    override val packages = listOf("com.instagram.android", "com.instagram.lite")
+ 
+-        val targets = listOf(
+-            "$storage/Android/data/$activePkg/cache" to "Instagram Media Cache (>14 days)"
++    override fun targets(pkg: String): List<Target> = listOf(
++        Target(
++            dir = "$storage/Android/data/$pkg/cache",
++            reason = "Cached Instagram media.",
++            minAgeMs = TimeUnit.DAYS.toMillis(14),
++            confidence = ConfidenceLevel.MEDIUM,
++            risk = RiskLevel.SAFE
+         )
+-
+-        targets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.MEDIUM,
+-                                    risk = RiskLevel.SAFE,
+-                                    owningPackage = activePkg,
+-                                    requiresShizuku = true,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++    )
++}
+diff -ruN orig/core-main/scanner/TelegramScanner.kt src/core-main/scanner/TelegramScanner.kt
+--- orig/core-main/scanner/TelegramScanner.kt	2026-10-13 20:42:24.804748649 +0000
++++ src/core-main/scanner/TelegramScanner.kt	2026-10-14 02:44:19.708135724 +0000
+@@ -1,86 +1,42 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
+ import java.util.concurrent.TimeUnit
+ 
++/** Telegram's four media folders under Android/media, files older than 14 days. Never pre-selected. */
+ class TelegramScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "telegram_forensics"
+     override val displayName = "Telegram Forensics"
+-    // Android/media is accessible via MANAGE_EXTERNAL_STORAGE, not Shizuku.
++
++    // Android/media is reachable with All-files access; no Shizuku needed.
+     override val requirement = Requirement.ALL_FILES_ACCESS
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "org.telegram.messenger"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        if (!inventory.isCurrentlyInstalled(pkg)) return@flow
++    override val packages = listOf("org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.plus")
+ 
++    override fun targets(pkg: String): List<Target> {
+         val base = "$storage/Android/media/$pkg/Telegram"
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(14)
+-        val batch = mutableListOf<ScanItem>()
+-
+-        val targets = listOf(
+-            "$base/Telegram Video" to "Telegram Video Cache (>14 days)",
+-            "$base/Telegram Audio" to "Telegram Audio Cache (>14 days)",
+-            "$base/Telegram Images" to "Telegram Image Cache (>14 days)",
+-            "$base/Telegram Documents" to "Telegram Document Cache (>14 days)"
++        fun folder(name: String, what: String) = Target(
++            dir = "$base/$name",
++            reason = "$what that Telegram downloaded to this phone.",
++            minAgeMs = TimeUnit.DAYS.toMillis(14),
++            confidence = ConfidenceLevel.MEDIUM,
++            risk = RiskLevel.ELEVATED
+         )
+-
+-        targets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.MEDIUM,
+-                                    risk = RiskLevel.ELEVATED,
+-                                    owningPackage = pkg,
+-                                    requiresShizuku = false,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++        return listOf(
++            folder("Telegram Video", "A video"),
++            folder("Telegram Audio", "An audio file"),
++            folder("Telegram Images", "An image"),
++            folder("Telegram Documents", "A document")
++        )
++    }
++}
+diff -ruN orig/core-main/scanner/TikTokScanner.kt src/core-main/scanner/TikTokScanner.kt
+--- orig/core-main/scanner/TikTokScanner.kt	2026-10-13 20:42:24.804726747 +0000
++++ src/core-main/scanner/TikTokScanner.kt	2026-10-14 02:44:19.709335278 +0000
+@@ -1,93 +1,48 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.privileged.PrivilegedOperation
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * TikTok's video cache and music cache under Android/data, files older than 7 days.
++ *
++ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
++ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
++ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
++ */
+ class TikTokScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "tiktok_forensics"
+     override val displayName = "TikTok Forensics"
+     override val requirement = Requirement.SHIZUKU
+-	override val privilegedOperations = setOf(
+-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+-	)
++    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.zhiliaoapp.musically"
+-    private val pkgLite = "com.zhiliaoapp.musically.go"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val activePkg = when {
+-            inventory.isCurrentlyInstalled(pkg) -> pkg
+-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
+-            else -> return@flow
+-        }
+-
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(7)
+-        val batch = mutableListOf<ScanItem>()
++    override val packages = listOf("com.zhiliaoapp.musically", "com.zhiliaoapp.musically.go")
+ 
+-        val cacheTargets = listOf(
+-            "$storage/Android/data/$activePkg/cache" to "TikTok Video Cache (>7 days)",
+-            "$storage/Android/data/$activePkg/files/.music" to "TikTok Music Cache (>7 days)"
++    override fun targets(pkg: String): List<Target> = listOf(
++        Target(
++            dir = "$storage/Android/data/$pkg/cache",
++            reason = "A cached TikTok video.",
++            minAgeMs = TimeUnit.DAYS.toMillis(7),
++            confidence = ConfidenceLevel.HIGH,
++            risk = RiskLevel.SAFE
++        ),
++        Target(
++            dir = "$storage/Android/data/$pkg/files/.music",
++            reason = "Cached TikTok music.",
++            minAgeMs = TimeUnit.DAYS.toMillis(7),
++            confidence = ConfidenceLevel.HIGH,
++            risk = RiskLevel.SAFE
+         )
+-
+-        cacheTargets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.HIGH,
+-                                    risk = RiskLevel.SAFE,
+-                                    owningPackage = activePkg,
+-                                    requiresShizuku = true,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++    )
++}
+diff -ruN orig/core-main/scanner/TwitterXScanner.kt src/core-main/scanner/TwitterXScanner.kt
+--- orig/core-main/scanner/TwitterXScanner.kt	2026-10-13 20:42:24.804928447 +0000
++++ src/core-main/scanner/TwitterXScanner.kt	2026-10-14 02:44:19.710404065 +0000
+@@ -1,92 +1,41 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.privileged.PrivilegedOperation
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.fs.FsType
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
++import com.cleanforge.core.privileged.PrivilegedOperation
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * Twitter/X media cache under Android/data, files older than 7 days.
++ *
++ * DORMANT: not registered in the scanner set. These items live in Android/data, so the Shizuku service would have to delete
++ * single files, and it deliberately has no such operation (MaintenanceModel.toMaintenanceRequest returns null for
++ * FORENSIC_MEDIA). Registering this scanner before that exists would list items that can only ever be skipped.
++ */
+ class TwitterXScanner(
+-    private val backend: FileOperationBackend,
+-    private val inventory: PackageInventory,
++    backend: FileReadBackend,
++    inventory: PackageInventory,
+     private val storage: String,
+-    private val timeProvider: () -> Long = { System.currentTimeMillis() }
+-) : Scanner {
++    timeProvider: () -> Long = { System.currentTimeMillis() }
++) : ForensicFolderScanner(backend, inventory, timeProvider) {
+ 
+     override val id = "twitter_x_forensics"
+     override val displayName = "Twitter/X Forensics"
+     override val requirement = Requirement.SHIZUKU
+-	override val privilegedOperations = setOf(
+-    PrivilegedOperation.LIST_EXTERNAL_APP_DATA
+-)
++    override val privilegedOperations = setOf(PrivilegedOperation.LIST_EXTERNAL_APP_DATA)
+     override val mode = ScanMode.ON_DEMAND
+ 
+-    private val pkg = "com.twitter.android"
+-    private val pkgLite = "com.twitter.android.lite"
+-
+-    override fun scan(): Flow<List<ScanItem>> = flow {
+-        val activePkg = when {
+-            inventory.isCurrentlyInstalled(pkg) -> pkg
+-            inventory.isCurrentlyInstalled(pkgLite) -> pkgLite
+-            else -> return@flow
+-        }
+-
+-        val now = timeProvider()
+-        val minAge = TimeUnit.DAYS.toMillis(7)
+-        val batch = mutableListOf<ScanItem>()
++    override val packages = listOf("com.twitter.android", "com.twitter.android.lite")
+ 
+-        val targets = listOf(
+-            "$storage/Android/data/$activePkg/cache" to "Twitter/X Media Cache (>7 days)"
++    override fun targets(pkg: String): List<Target> = listOf(
++        Target(
++            dir = "$storage/Android/data/$pkg/cache",
++            reason = "Cached Twitter/X media.",
++            minAgeMs = TimeUnit.DAYS.toMillis(7),
++            confidence = ConfidenceLevel.HIGH,
++            risk = RiskLevel.SAFE
+         )
+-
+-        targets.forEach { (folderPath, reason) ->
+-            runCatching {
+-                val childNames = backend.list(folderPath) ?: return@runCatching
+-                childNames.forEach { name ->
+-                    val fullPath = "$folderPath/$name"
+-                    val stat = backend.lstat(fullPath) ?: return@forEach
+-                    
+-                    if (stat.type == FsType.FILE) {
+-                        val age = now - stat.mtimeMs
+-                        if (age >= minAge) {
+-                            batch.add(
+-                                ScanItem(
+-                                    path = fullPath,
+-                                    sizeBytes = stat.size,
+-                                    category = CleaningCategory.FORENSIC_MEDIA,
+-                                    reasonForFlagging = reason,
+-                                    confidence = ConfidenceLevel.HIGH,
+-                                    risk = RiskLevel.SAFE,
+-                                    owningPackage = activePkg,
+-                                    requiresShizuku = true,
+-                                    deleteMode = DeleteMode.FILE,
+-                                    reversibility = Reversibility.NOT_REVERSIBLE,
+-                                    lastModified = stat.mtimeMs,
+-                                    fingerprint = stat,
+-                                    isPreselected = false
+-                                )
+-                            )
+-                            if (batch.size >= BATCH_SIZE) {
+-                                emit(batch.toList())
+-                                batch.clear()
+-                            }
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-
+-        if (batch.isNotEmpty()) emit(batch.toList())
+-
+-    }.flowOn(Dispatchers.IO)
+-}
+\ No newline at end of file
++    )
++}
+diff -ruN orig/core-main/scanner/WhatsAppScanner.kt src/core-main/scanner/WhatsAppScanner.kt
+--- orig/core-main/scanner/WhatsAppScanner.kt	2026-10-13 20:42:24.804800018 +0000
++++ src/core-main/scanner/WhatsAppScanner.kt	2026-10-14 02:44:19.707030096 +0000
+@@ -1,158 +1,66 @@
+ package com.cleanforge.core.scanner
+ 
+-import com.cleanforge.core.backend.FileOperationBackend
++import com.cleanforge.core.backend.FileReadBackend
+ import com.cleanforge.core.backend.PackageInventory
+-import com.cleanforge.core.fs.DeleteMode
+-import com.cleanforge.core.model.CleaningCategory
+ import com.cleanforge.core.model.ConfidenceLevel
+-import com.cleanforge.core.model.Reversibility
+ import com.cleanforge.core.model.RiskLevel
+-import com.cleanforge.core.model.ScanItem
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.flow.Flow
+-import kotlinx.coroutines.flow.flow
+-import kotlinx.coroutines.flow.flowOn
+ import java.util.concurrent.TimeUnit
+ 
++/**
++ * WhatsApp and WhatsApp Business, whichever is installed (both, if both are). Only the exact folders below are looked
++ * at, and only single files in them; everything else in WhatsApp's folders is the user's chat data and is left alone.
++ * The same allowlist is enforced a second time by SafetyValidator, so a scanner bug cannot widen it.

@@ -10,58 +10,41 @@ permissions:
 
 jobs:
   build:
-    name: Test and build debug APK
+    name: Test, lint, build
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
-
-      - name: Grant execute permission
-        run: chmod +x ./gradlew
-
-      - name: Run unit tests
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - run: chmod +x ./gradlew
+      - name: Unit tests
         run: ./gradlew --no-daemon clean :app:testDebugUnitTest
-
-      - name: Run Android lint
-        continue-on-error: true
+      - name: Lint (strict: errors fail the build)
         run: ./gradlew --no-daemon :app:lintDebug -PstrictLint
-
-      - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug
-
-      - name: Prepare downloadable APK
+      - name: Build debug and release
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+      - name: Prepare artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           cp app/build/outputs/apk/debug/*.apk out/CleanForge-debug.apk
-          test -s out/CleanForge-debug.apk
-
-      - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
+          if [[ -f app/build/outputs/apk/release/app-release.apk ]]; then
+            cp app/build/outputs/apk/release/app-release.apk out/CleanForge-release.apk
+          elif [[ -f app/build/outputs/apk/release/app-release-unsigned.apk ]]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk out/CleanForge-release-unsigned.apk
+          else
+            echo "::error::No release APK produced"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
         with:
-          name: CleanForge-debug-apk
-          path: out/CleanForge-debug.apk
+          name: CleanForge-apks
+          path: out/*.apk
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload test and lint reports
-        if: always()
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: CleanForge-reports
@@ -70,30 +53,27 @@ jobs:
             app/build/test-results
             app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
-          retention-days: 14
 
   release:
-    name: Publish debug APK to GitHub Releases (temporary)
+    name: Publish signed APK to GitHub Releases
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Download debug APK artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
+        with: { name: CleanForge-apks, path: out }
+      - name: Require a signed release APK
+        shell: bash
+        run: |
+          if [[ ! -f out/CleanForge-release.apk ]]; then
+            echo "::error::The release build is unsigned. Configure signing before publishing a release."
+            exit 1
+          fi
+      - uses: softprops/action-gh-release@v2
         with:
-          name: CleanForge-debug-apk
-          path: out
-
-      - name: Verify debug APK
-        run: test -s out/CleanForge-debug.apk
-
-      - name: Publish debug APK to GitHub Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          files: out/CleanForge-debug.apk
+          files: out/CleanForge-release.apk
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

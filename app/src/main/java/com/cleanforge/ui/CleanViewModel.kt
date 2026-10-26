@@ -1,12 +1,18 @@
 package com.cleanforge.ui
 
+import android.content.Context
+import android.content.Intent
 import android.os.Environment
 import android.os.StatFs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cleanforge.core.backend.Capabilities
 import com.cleanforge.core.cleaning.CleaningProgress
+import com.cleanforge.core.cleaning.PermissionAnnotator
 import com.cleanforge.core.cleaning.PlanBuilder
+import com.cleanforge.core.diagnostics.DiagnosticExporter
+import com.cleanforge.core.diagnostics.DiagnosticScanner
+import com.cleanforge.core.model.CleaningCategory
 import com.cleanforge.core.model.CleaningPlan
 import com.cleanforge.core.model.CleaningReport
 import com.cleanforge.core.model.ItemOutcome
@@ -20,11 +26,11 @@ import com.cleanforge.core.shizuku.ShizukuManager
 import com.cleanforge.core.shizuku.ShizukuState
 import com.cleanforge.data.repository.ScanProgress
 import com.cleanforge.data.repository.ScanRepository
+import com.cleanforge.domain.usecase.CollectDiagnosticReportUseCase
 import com.cleanforge.domain.usecase.ExecuteCleaningPlanUseCase
-import com.cleanforge.core.model.CleaningCategory
+import com.cleanforge.domain.usecase.ScanDeviceUseCase
 import com.cleanforge.domain.usecase.StorageBreakdown
 import com.cleanforge.domain.usecase.StorageBreakdownUseCase
-import com.cleanforge.domain.usecase.ScanDeviceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -42,11 +48,9 @@ data class CleaningUi(
     val freedBytes: Long = 0L,
     val current: String = "",
     val report: CleaningReport? = null,
-    /** The user pressed Stop; the run ends after the item in flight. */
     val stopping: Boolean = false
 )
 
-/** The storage card behind the hero: loaded when it is opened. */
 data class StorageUi(
     val expanded: Boolean = false,
     val loading: Boolean = false,
@@ -59,14 +63,11 @@ data class CleanUiState(
     val totalBytes: Long = 0L,
     val hasAllFilesAccess: Boolean = false,
     val shizuku: ShizukuState = ShizukuState.NotRunning,
-    /** Per-operation capability, as probed. Null until the first probe finished. */
     val capabilities: CapabilityReport? = null,
     val scanning: Boolean = false,
     val scanLabel: String = "",
-    /** True once a scan has finished, so "no results" can be told apart from "never scanned". */
     val scanned: Boolean = false,
     val notices: List<String> = emptyList(),
-    /** One neutral line per scanner that ran: what it found, so "nothing" can be told apart from "did not run". */
     val scanSummary: List<String> = emptyList(),
     val storage: StorageUi = StorageUi(),
     val items: List<ScanItem> = emptyList(),
@@ -89,7 +90,9 @@ class CleanViewModel @Inject constructor(
     private val shizuku: ShizukuManager,
     private val capabilities: Capabilities,
     private val registry: CapabilityRegistry,
-    private val storageBreakdown: StorageBreakdownUseCase
+    private val storageBreakdown: StorageBreakdownUseCase,
+    private val permissionAnnotator: PermissionAnnotator,
+    private val diagnosticReport: CollectDiagnosticReportUseCase
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CleanUiState())
@@ -100,12 +103,8 @@ class CleanViewModel @Inject constructor(
 
     init {
         refreshDevice()
-        viewModelScope.launch {
-            shizuku.state.collect { st -> _ui.update { it.copy(shizuku = st) } }
-        }
-        viewModelScope.launch {
-            registry.report.collect { r -> _ui.update { it.copy(capabilities = r) } }
-        }
+        viewModelScope.launch { shizuku.state.collect { st -> _ui.update { it.copy(shizuku = st) } } }
+        viewModelScope.launch { registry.report.collect { r -> _ui.update { it.copy(capabilities = r) } } }
         viewModelScope.launch {
             repository.items.collect { items ->
                 val present = items.mapTo(HashSet<String>()) { it.path }
@@ -120,7 +119,6 @@ class CleanViewModel @Inject constructor(
         refreshDevice()
     }
 
-    /** Re-reads Shizuku and re-probes capabilities. Binder calls: always off the main thread. */
     fun recheckShizuku() {
         viewModelScope.launch(Dispatchers.IO) {
             shizuku.refresh()
@@ -128,7 +126,6 @@ class CleanViewModel @Inject constructor(
         }
     }
 
-    /** The "Check again" button: a probe that ignores the recent-result shortcut. */
     fun forceRecheckShizuku() {
         viewModelScope.launch(Dispatchers.IO) {
             shizuku.refresh()
@@ -149,8 +146,6 @@ class CleanViewModel @Inject constructor(
             }
         }
     }
-
-    // ---------- SCAN + CLASSIFY ----------
 
     fun scan(mode: ScanMode) {
         if (_ui.value.busy) return
@@ -194,36 +189,23 @@ class CleanViewModel @Inject constructor(
                         scanSummary = summary
                     )
                 }
-                if (_ui.value.storage.expanded) loadStorage() // the caches slice depends on the scan
+                if (_ui.value.storage.expanded) loadStorage()
             }
         }
     }
 
-    fun cancelScan() {
-        scanJob?.cancel()
-    }
-
-    // ---------- SELECTION ----------
+    fun cancelScan() { scanJob?.cancel() }
 
     fun toggle(path: String) {
         _ui.update { s -> s.copy(selected = if (path in s.selected) s.selected - path else s.selected + path) }
     }
 
-    /** Ticks only well-evidenced app caches. Everything else must be ticked by the user. */
     fun selectRecommended() {
         _ui.update { s -> s.copy(selected = s.selected + s.items.filter { it.isPreselected }.map { it.path }) }
     }
 
-    fun clearSelection() {
-        _ui.update { it.copy(selected = emptySet()) }
-    }
+    fun clearSelection() { _ui.update { it.copy(selected = emptySet()) } }
 
-    // ---------- VALIDATE + PLAN -> USER CONFIRMATION ----------
-
-    /**
-     * "Select everything" for the Review tab: ticks every suggestion shown (keeping the oldest copy of each duplicate
-     * group, since the plan refuses to delete all copies) and opens the normal confirmation, which lists every path.
-     */
     fun selectEverythingAndReview(candidates: List<ScanItem>) {
         if (_ui.value.busy || candidates.isEmpty()) return
         val keepers = HashSet<String>()
@@ -264,22 +246,20 @@ class CleanViewModel @Inject constructor(
         if (s.busy || s.plan != null) return
         val chosen = s.items.filter { it.path in s.selected }
         if (chosen.isEmpty()) return
-        _ui.update { it.copy(plan = planBuilder.build(chosen, s.items)) }
+        val base = planBuilder.build(chosen, s.items)
+        _ui.update { it.copy(plan = base) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val annotated = permissionAnnotator.annotate(base)
+            _ui.update { if (it.plan === base) it.copy(plan = annotated) else it }
+        }
     }
 
-    fun dismissPlan() {
-        _ui.update { it.copy(plan = null) }
-    }
-
-    // ---------- REVALIDATE -> DELETE -> VERIFY -> REPORT ----------
+    fun dismissPlan() { _ui.update { it.copy(plan = null) } }
 
     fun confirmClean() {
         val plan = _ui.value.plan ?: return
         if (_ui.value.busy) return
-        if (plan.isEmpty) {
-            dismissPlan()
-            return
-        }
+        if (plan.isEmpty) { dismissPlan(); return }
         _ui.update { it.copy(plan = null, cleaning = CleaningUi(total = plan.items.size)) }
         cleanJob = viewModelScope.launch {
             val outcomes = ArrayList<ItemOutcome>()
@@ -304,10 +284,7 @@ class CleanViewModel @Inject constructor(
                                 )
                             }
                         }
-                        is CleaningProgress.Completed -> {
-                            completed = true
-                            applyReport(p.report)
-                        }
+                        is CleaningProgress.Completed -> { completed = true; applyReport(p.report) }
                         else -> Unit
                     }
                 }
@@ -323,16 +300,11 @@ class CleanViewModel @Inject constructor(
         }
     }
 
-    /** Stops after the item in flight. Whatever was already done is reported; nothing is guessed. */
     fun cancelClean() {
         _ui.update { it.copy(cleaning = it.cleaning?.copy(stopping = true)) }
         cleanJob?.cancel()
     }
 
-    /**
-     * A stopped or failed run still gets an honest report: finished items keep their outcome, the item that was in
-     * flight is UNVERIFIED (it may or may not have been touched), and the rest are marked not attempted.
-     */
     private fun partialReport(plan: CleaningPlan, outcomes: List<ItemOutcome>, inFlight: ScanItem?, why: String): CleaningReport {
         val reported = outcomes.mapTo(HashSet<String>()) { it.item.path }
         val all = ArrayList<ItemOutcome>(outcomes)
@@ -364,14 +336,43 @@ class CleanViewModel @Inject constructor(
         refreshDevice()
     }
 
-    fun dismissReport() {
-        _ui.update { it.copy(cleaning = null) }
+    fun dismissReport() { _ui.update { it.copy(cleaning = null) } }
+
+    fun requestShizukuPermission() {
+        viewModelScope.launch(Dispatchers.IO) { shizuku.requestPermission() }
     }
 
-    /** Shows the permission dialog only when it can appear; a "don't ask again" denial needs the Shizuku app. */
-    fun requestShizukuPermission() {
+    fun showDiagnostics(context: Context, redactPaths: Boolean = true) {
         viewModelScope.launch(Dispatchers.IO) {
-            shizuku.requestPermission()
+            val s = _ui.value
+            val scanners = s.scanSummary.map { line ->
+                val name = line.substringBefore(':')
+                val count = Regex("(\\d+) found").find(line)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                DiagnosticScanner(
+                    name = name,
+                    status = if (count > 0) "ran" else "ran (nothing found)",
+                    itemCount = count,
+                    bytes = 0L,
+                    reason = null
+                )
+            }
+            val report = diagnosticReport(
+                totalBytes = s.totalBytes,
+                freeBytes = s.freeBytes,
+                scanners = scanners,
+                notices = s.notices,
+                redactPaths = redactPaths
+            )
+            val text = DiagnosticExporter.toText(report)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+                putExtra(Intent.EXTRA_SUBJECT, "CleanForge diagnostic report")
+            }
+            val chooser = Intent.createChooser(intent, "Share report").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
         }
     }
 }
