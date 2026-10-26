@@ -268,7 +268,7 @@ class CleaningEngineTest {
 
     // ---------- the privileged channel misbehaving (Part 2) ----------
 
-    @Test fun `an unreachable Shizuku service is a failure, never the harmless "already gone"`() = runTest {
+    @Test fun `an unreachable Shizuku service is a failure never the harmless already gone`() = runTest {
         fs.file("$cachePath/a.bin", 40)
         val item = cacheItem()
         provider.notReady = com.cleanforge.core.privileged.SessionResult.NotReady(

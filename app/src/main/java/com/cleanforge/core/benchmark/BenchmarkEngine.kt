@@ -95,7 +95,7 @@ class BenchmarkEngine(private val fs: FsOps) {
                 if (!f.canRead()) null else f.readText().trim().split(' ').getOrNull(1)?.toLongOrNull()?.times(4096L)
             }.getOrNull()
             if (android != null && android > 0L) return android
-            // JVM fallback returns 0 (PolicyGuardTest forbids Runtime.getRuntime to keep the "no shell" rule).
+            // JVM fallback returns 0 (PolicyGuardTest forbids shell commands to keep the no shell rule).
             return 0L
         }
     }
