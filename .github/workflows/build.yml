@@ -1,0 +1,208 @@
+
+name: CleanForge Build and Release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant execute permission
+        run: chmod +x ./gradlew
+
+      - name: Run unit tests
+        run: ./gradlew --no-daemon clean :app:testDebugUnitTest
+
+      - name: Run Android lint
+        continue-on-error: true
+        run: ./gradlew --no-daemon :app:lintDebug -PstrictLint
+
+      # Only version tags get access to release-signing secrets.
+      - name: Configure release signing
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          test -n "$KEYSTORE_BASE64" || {
+            echo "::error::Missing KEYSTORE_BASE64 secret"
+            exit 1
+          }
+          test -n "$KEYSTORE_PASSWORD" || {
+            echo "::error::Missing KEYSTORE_PASSWORD secret"
+            exit 1
+          }
+          test -n "$KEY_ALIAS" || {
+            echo "::error::Missing KEY_ALIAS secret"
+            exit 1
+          }
+          test -n "$KEY_PASSWORD" || {
+            echo "::error::Missing KEY_PASSWORD secret"
+            exit 1
+          }
+
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" |
+            base64 --decode > cleanforge-release.jks
+
+          # Write Java properties with special characters escaped.
+          python3 - <<'PY'
+          import os
+
+          def escape(value):
+              if "\n" in value or "\r" in value:
+                  raise SystemExit("Invalid newline in signing secret")
+              value = value.replace("\\", "\\\\")
+              for char in (":", "=", "#", "!"):
+                  value = value.replace(char, "\\" + char)
+              if value.startswith(" "):
+                  value = "\\" + value
+              return value
+
+          with open("keystore.properties", "w", encoding="utf-8") as f:
+              f.write("storeFile=cleanforge-release.jks\n")
+              f.write("storePassword=" + escape(os.environ["KEYSTORE_PASSWORD"]) + "\n")
+              f.write("keyAlias=" + escape(os.environ["KEY_ALIAS"]) + "\n")
+              f.write("keyPassword=" + escape(os.environ["KEY_PASSWORD"]) + "\n")
+          PY
+
+          keytool -list \
+            -keystore cleanforge-release.jks \
+            -alias "$KEY_ALIAS" \
+            -storepass:env KEYSTORE_PASSWORD \
+            >/dev/null
+
+      - name: Build debug and release APKs
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+
+      # Never publish a release APK unless its signature verifies.
+      - name: Verify signed release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk="app/build/outputs/apk/release/app-release.apk"
+          test -f "$apk" || {
+            echo "::error::Signed release APK was not produced"
+            exit 1
+          }
+
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$sdk" || {
+            echo "::error::Android SDK path not found"
+            exit 1
+          }
+
+          apksigner="$(find "$sdk/build-tools" \
+            -type f -name apksigner -print | sort -V | tail -n 1)"
+
+          test -n "$apksigner" || {
+            echo "::error::apksigner was not found"
+            exit 1
+          }
+
+          "$apksigner" verify --verbose --print-certs "$apk"
+
+      - name: Prepare downloadable APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          debug_apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$debug_apk"
+          cp "$debug_apk" out/CleanForge-debug.apk
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            release_apk="app/build/outputs/apk/release/app-release.apk"
+            test -f "$release_apk"
+            cp "$release_apk" out/CleanForge-release-signed.apk
+          else
+            release_apk="app/build/outputs/apk/release/app-release-unsigned.apk"
+            if [[ -f "$release_apk" ]]; then
+              cp "$release_apk" out/CleanForge-release-unsigned.apk
+            fi
+          fi
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CleanForge-apks
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CleanForge-reports
+          path: |
+            app/build/reports/tests
+            app/build/test-results
+            app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Publish signed APK to GitHub Releases
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: CleanForge-apks
+          path: out
+
+      - name: Require signed release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s out/CleanForge-release-signed.apk || {
+            echo "::error::Refusing to publish without a signed release APK"
+            exit 1
+          }
+
+      - name: Publish signed APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/CleanForge-release-signed.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
